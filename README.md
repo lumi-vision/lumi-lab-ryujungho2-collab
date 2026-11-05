@@ -35,7 +35,7 @@ flowchart LR
 | 원본–변형본, ROI 허용 마스크와 시간 파형 생성 | 구현 | `src/lumi/dataset_synthesis.py` |
 | 조건부 3D CNN Generator/Discriminator 및 Hinge GAN 학습 | 구현 | `src/lumi/gan_synthesis.py` |
 | 데이터 배열 형식·ROI 외 보존·원본 해시 기반 분할 감사 | 구현 | `src/lumi/dataset_audit.py` |
-| 공식 ITU/WCAG 위험 판정, 위험 기여 마스크 | **미구현** | 향후 별도 평가기 |
+| 공식 ITU/WCAG 위험 판정, 위험 기여 마스크 | **미구현** | IRIS 라벨링 계획: `docs/IRIS_LABELING_PLAN.md` |
 | GAN 학습 수렴/일반화, 국소 보정기, 60FPS 실시간성 | **미검증/미구현** | 실험 계획 참조 |
 
 **코드 테스트:** `python -m pytest -q` 실행 결과 **17 passed, 1 skipped** (2026-11-05, CPU 노트북 — CUDA bf16 시험은 GPU PC에서만 실행). 이 결과는 위험도·화질·실시간 처리 성능을 검증하지 않는다.
@@ -50,6 +50,7 @@ flowchart LR
 6. [문헌·국제 표준 링크](docs/REFERENCES.md)
 7. [저장소 업로드 안내](docs/UPLOAD_GUIDE.md)
 8. [노트북 ↔ GitHub ↔ 집 GPU PC(RTX 5080) 설치·작업 흐름](docs/HOME_GPU_SETUP.md)
+9. [IRIS 라벨링 계획 (합성 데이터에 독립 검사 결과 붙이기)](docs/IRIS_LABELING_PLAN.md)
 
 ## 시작하기 — Windows 11 / PowerShell
 
