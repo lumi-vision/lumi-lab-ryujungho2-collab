@@ -70,7 +70,7 @@ class VideoReader:
             except ImportError as ex:
                 if self.backend == "pyav":
                     raise RuntimeError(
-                        "PyAV가 설치되어 있지 않습니다. 설치 명령: pip install -e '.[precise]'"
+                        "PyAV가 설치되어 있지 않습니다. setup_windows.ps1로 설치하세요"
                     ) from ex
             else:
                 self._open_pyav(av)

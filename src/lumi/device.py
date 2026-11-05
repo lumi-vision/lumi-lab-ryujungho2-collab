@@ -11,7 +11,7 @@ def resolve_device(name: str = "auto") -> torch.device:
     if name.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError(
             "CUDA를 요청했지만 사용할 수 없습니다. `python scripts/check_env.py`로 "
-            "PyTorch CUDA 빌드와 드라이버를 확인하세요 (docs/HOME_GPU_SETUP.md)."
+            "PyTorch CUDA 빌드와 드라이버를 확인하세요 (docs/COLLABORATION.md 3절)."
         )
     return torch.device(name)
 

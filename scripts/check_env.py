@@ -28,18 +28,18 @@ def main() -> int:
         ok &= check("OpenCV", has_gui, f"{cv2.__version__} · {gui_line}"
                     + ("" if has_gui else " → opencv-python-headless 제거 후 opencv-python 설치"))
     except ImportError:
-        ok &= check("OpenCV", False, "미설치 → pip install -e .")
+        ok &= check("OpenCV", False, "미설치 → setup_windows.ps1 실행")
 
     try:
         import av
         check("PyAV(선택)", True, av.__version__)
     except ImportError:
-        check("PyAV(선택)", True, "미설치 · 정밀 PTS가 필요하면 pip install -e '.[precise]'")
+        check("PyAV(선택)", True, "미설치 · 정밀 PTS가 필요하면 setup_windows.ps1 실행")
 
     try:
         import torch
     except ImportError:
-        check("PyTorch", False, "미설치 → docs/HOME_GPU_SETUP.md 참고")
+        check("PyTorch", False, "미설치 → setup_windows.ps1 실행 (docs/COLLABORATION.md)")
         return 1
     check("PyTorch", True, f"{torch.__version__} · CUDA 빌드 {torch.version.cuda or '없음(CPU 전용)'}")
 
