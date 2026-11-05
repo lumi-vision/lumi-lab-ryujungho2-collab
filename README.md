@@ -53,7 +53,8 @@ flowchart LR
 5. [IRIS 라벨링 계획과 확인 시험 결과](docs/IRIS_LABELING_PLAN.md)
 6. [구현 파일별 증거·미구현 목록·한계](docs/IMPLEMENTATION_AUDIT.md)
 7. [문헌·국제 표준 링크](docs/REFERENCES.md)
-8. [협업 안내: 무엇을 공유하나 · 노트북/GPU PC 설치 · 팀원 데이터 규약](docs/COLLABORATION.md)
+8. [G(조건부 생성기) 실험 기록](docs/GAN_EXPERIMENTS.md)
+9. [협업 안내: 무엇을 공유하나 · 노트북/GPU PC 설치 · 팀원 데이터 규약](docs/COLLABORATION.md)
 
 ## 시작하기 — Windows 11 / PowerShell
 
