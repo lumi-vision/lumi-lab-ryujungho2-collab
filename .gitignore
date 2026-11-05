@@ -239,5 +239,8 @@ sample/
 *.mp4
 *.mov
 *.mkv
+iris_checks/
+*.iris.csv
+*.iris.json
 .omc/
 .claude/

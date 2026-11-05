@@ -18,10 +18,22 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-source-seconds", type=int, default=60,
                         help="각 원본 영상에서 읽을 최대 길이(초), 메모리 사용량 제한")
+    parser.add_argument("--segments", type=int, default=1,
+                        help="클립 안에서 주파수·세기가 바뀌는 구간 수(1 = 주파수 하나)")
+    parser.add_argument("--export-video", action="store_true",
+                        help="IRIS 입력용 무손실 FFV1/MKV를 함께 저장(재생 금지)")
+    parser.add_argument("--iris-clips", action="store_true",
+                        help="IRIS 라벨용 기본값: 144프레임(6초@24fps), 3구간, 무손실 영상 저장")
     args = parser.parse_args()
+    if args.iris_clips:
+        # IRIS 판정에는 1초(깜빡임)·5초(연장 실패) 구간이 필요하므로 6초 이상으로 만듭니다.
+        args.frames = max(args.frames, 6 * args.fps)
+        args.segments = max(args.segments, 3)
+        args.export_video = True
     cfg = DatasetConfig(frames=args.frames, width=args.width, height=args.height,
                         fps=args.fps, seed=args.seed,
-                        max_source_seconds=args.max_source_seconds)
+                        max_source_seconds=args.max_source_seconds,
+                        segments=args.segments, export_video=args.export_video)
     entries = build_dataset(args.source, args.output, samples_per_source=args.samples, cfg=cfg)
     count = {k: sum(v["type"] == k for v in entries) for k in ("normal", "luminance", "red", "pattern")}
     print(f"합성 완료: {len(entries)}개, 유형별 개수={count}")

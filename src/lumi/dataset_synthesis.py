@@ -25,10 +25,16 @@ class DatasetConfig:
     fps: int = 24
     seed: int = 42
     max_source_seconds: int = 60
+    # 1이면 클립 전체가 주파수 1개(v0.3 동작). 2 이상이면 주파수·세기가 바뀌는 구간 수.
+    segments: int = 1
+    # True면 IRIS 입력용 무손실 영상(FFV1/MKV)을 .npz 옆에 함께 저장합니다.
+    export_video: bool = False
 
     def validate(self) -> None:
         if self.frames < 4 or self.width < 32 or self.height < 32 or self.fps < 8 or self.max_source_seconds < 1:
             raise ValueError("프레임 수는 4 이상, 해상도는 32 이상, FPS는 8 이상이어야 합니다.")
+        if not 1 <= self.segments <= self.frames // 4:
+            raise ValueError("구간 수는 1 이상, 프레임 수/4 이하여야 합니다(구간당 최소 4프레임).")
 
 
 def split_for_source(source_id: str, *, only_one: bool = False) -> str:
@@ -98,22 +104,65 @@ def _spatial_mask(cfg: DatasetConfig, rng: np.random.Generator) -> np.ndarray:
     return mask
 
 
-def _activation(cfg: DatasetConfig, rng: np.random.Generator) -> tuple[np.ndarray, dict]:
-    """제어 가능한 시간 파형을 생성합니다. 주파수만으로 위험을 판정하지 않습니다."""
-    freq = float(rng.uniform(0.8, min(cfg.fps / 2 * 0.85, 10.0)))
+def _wave(position: np.ndarray, waveform: str) -> np.ndarray:
+    """누적 주기 수(position)를 0~1 파형 값으로 바꿉니다."""
+    if waveform == "square":
+        return (np.sin(2 * np.pi * position) >= 0).astype(np.float32)
+    if waveform == "triangle":
+        return 1 - np.abs(2 * (position - np.floor(position)) - 1)
+    return (np.sin(2 * np.pi * position) + 1) / 2
+
+
+def _segment_bounds(cfg: DatasetConfig, rng: np.random.Generator) -> list[int]:
+    """구간당 최소 4프레임을 보장하는 임의 경계 [0, ..., frames]."""
+    spare = cfg.frames - 4 * cfg.segments
+    cuts = np.sort(rng.integers(0, spare + 1, cfg.segments - 1))
+    lengths = np.diff(np.concatenate(([0], cuts, [spare]))) + 4
+    return [0, *np.cumsum(lengths).tolist()]
+
+
+def _activation(cfg: DatasetConfig, rng: np.random.Generator) -> tuple[np.ndarray, dict, np.ndarray]:
+    """제어 가능한 시간 파형을 생성합니다. 주파수만으로 위험을 판정하지 않습니다.
+
+    반환: 활성화 [T], 메타데이터, 시작 시점부터의 누적 주기 수 [T](패턴 이동에 사용).
+    `segments > 1`이면 구간마다 주파수와 진폭(0이면 휴지 구간)이 바뀌고,
+    위상은 구간 경계에서 이어집니다.
+    """
+    max_freq = min(cfg.fps / 2 * 0.85, 10.0)
+    if cfg.segments == 1:
+        freq = float(rng.uniform(0.8, max_freq))
+        phase = float(rng.uniform(0, 2 * np.pi))
+        waveform = str(rng.choice(("sine", "square", "triangle")))
+        times = np.arange(cfg.frames, dtype=np.float32) / cfg.fps
+        activation = _wave(freq * times + phase / (2 * np.pi), waveform)
+        # v0.3과 같은 연산 순서(t * f / fps)를 유지해 기존 시드의 결과를 바꾸지 않습니다.
+        cycles = np.arange(cfg.frames) * freq / cfg.fps
+        return activation.astype(np.float32), {
+            "frequency_hz": freq, "phase_rad": phase, "waveform": waveform,
+        }, cycles
+
     phase = float(rng.uniform(0, 2 * np.pi))
     waveform = str(rng.choice(("sine", "square", "triangle")))
-    times = np.arange(cfg.frames, dtype=np.float32) / cfg.fps
-    position = freq * times + phase / (2 * np.pi)
-    if waveform == "square":
-        activation = (np.sin(2 * np.pi * position) >= 0).astype(np.float32)
-    elif waveform == "triangle":
-        activation = 1 - np.abs(2 * (position - np.floor(position)) - 1)
-    else:
-        activation = (np.sin(2 * np.pi * position) + 1) / 2
+    bounds = _segment_bounds(cfg, rng)
+    freqs = np.empty(cfg.frames, dtype=np.float64)
+    amps = np.empty(cfg.frames, dtype=np.float32)
+    segments = []
+    for start, end in zip(bounds[:-1], bounds[1:]):
+        freq = float(rng.uniform(0.5, max_freq))
+        # 휴지 구간을 섞어 통과·경고·실패 판정이 한 클립 안에서 바뀌게 합니다.
+        amp = 0.0 if rng.random() < 0.2 else float(rng.uniform(0.3, 1.0))
+        freqs[start:end] = freq
+        amps[start:end] = amp
+        segments.append({"start_frame": int(start), "end_frame": int(end),
+                         "frequency_hz": freq, "amplitude": amp})
+    # 프레임 t의 누적 주기 = sum_{k<t} f_k / fps  (구간 경계에서 위상 연속)
+    cycles = np.concatenate(([0.0], np.cumsum(freqs[:-1]) / cfg.fps))
+    activation = amps * _wave(cycles + phase / (2 * np.pi), waveform)
+    mean_freq = float(np.mean([s["frequency_hz"] for s in segments]))
     return activation.astype(np.float32), {
-        "frequency_hz": freq, "phase_rad": phase, "waveform": waveform,
-    }
+        "frequency_hz": mean_freq, "phase_rad": phase, "waveform": waveform,
+        "segments": segments,
+    }, cycles
 
 
 def synthesize(clean: np.ndarray, cfg: DatasetConfig, kind: str,
@@ -133,7 +182,7 @@ def synthesize(clean: np.ndarray, cfg: DatasetConfig, kind: str,
 
     base_mask = _spatial_mask(cfg, rng)
     masks = np.repeat(base_mask[None], cfg.frames, axis=0)
-    activation, profile = _activation(cfg, rng)
+    activation, profile, cycles = _activation(cfg, rng)
     intensity = float(rng.uniform(0.15, 0.85))
     rgb = clean.astype(np.float32) / 255.0
     modified = rgb.copy()
@@ -151,7 +200,7 @@ def synthesize(clean: np.ndarray, cfg: DatasetConfig, kind: str,
             local = rgb[t] * (1 - amount) + target_color * amount
         else:
             # 패턴은 방향·간격·시간 위상을 갖는 국소 대비 변화입니다.
-            shift = t * float(profile["frequency_hz"]) / cfg.fps * np.pi
+            shift = float(cycles[t]) * np.pi
             pattern = np.sin(np.arcsin(np.clip(spatial_wave, -1, 1)) + shift)
             local = np.clip(rgb[t] + (pattern[..., None] * 0.5) * amount, 0, 1)
         changed = np.rint(local * 255).astype(np.uint8)
@@ -206,6 +255,11 @@ def build_dataset(sources: list[Path], output: Path, *, samples_per_source: int 
             filename = destination / f"{name}.npz"
             np.savez_compressed(filename, clean=clean, affected=affected,
                                 mask=mask, activation=activation)
+            video = None
+            if cfg.export_video:
+                from .lossless_video import write_lossless_video
+                write_lossless_video(destination / f"{name}.mkv", affected, cfg.fps)
+                video = f"{split}/{name}.mkv"
             row = {
                 "id": name, "source_id": key, "source_name": source.name,
                 "split": split, "type": kind, "frames": cfg.frames,
@@ -215,6 +269,8 @@ def build_dataset(sources: list[Path], output: Path, *, samples_per_source: int 
                 "standard_result": "not_evaluated",
                 "preview_safe": False,
             }
+            if video is not None:
+                row["video"] = video
             (destination / f"{name}.json").write_text(
                 json.dumps(row, ensure_ascii=False, indent=2), encoding="utf-8")
             manifest.append(row)

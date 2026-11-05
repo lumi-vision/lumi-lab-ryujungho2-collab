@@ -22,12 +22,16 @@
 | `<split>/*.npz` | `mask` | `[T,H,W]`, `uint8`, 변형 허용 영역 |
 | `<split>/*.npz` | `activation` | `[T]`, `float32`, 시간 활성화 |
 | `manifest.jsonl`, JSON | `id`, `source_id`, `source_name`, `split`, `file` | 식별·출처·분할·상대 경로 |
-| `manifest.jsonl`, JSON | `type`, `parameters`, `fps` | 합성 유형, 합성 조건, 명목 FPS |
-| `manifest.jsonl`, JSON | `risk_verified` | 현재 **항상 false** |
-| `manifest.jsonl`, JSON | `standard_result` | 현재 **`not_evaluated`** |
+| `manifest.jsonl`, JSON | `type`, `parameters`, `fps` | 합성 유형(**조건**, 정답 아님), 합성 조건, 명목 FPS |
+| `manifest.jsonl`, JSON | `parameters.segments` | (`--segments ≥ 2`일 때) 구간별 `start_frame`, `end_frame`, `frequency_hz`, `amplitude`(0 = 휴지) |
+| `manifest.jsonl`, JSON | `video` | (`--export-video`일 때) `affected`의 FFV1/MKV 무손실 영상 상대 경로. 저장 후 다시 읽어 바이트 일치를 확인함 |
+| `manifest.jsonl`, JSON | `risk_verified` | `true` = **IRIS로 검사했음**(위험/안전 판정 아님). 검사 전이나 IRIS 오류이면 `false` |
+| `manifest.jsonl`, JSON | `standard_result` | 검사 전 `not_evaluated` · `iris:pass` · `iris:pass_with_warning` · `iris:<종류>_<결과>`(여러 개는 `+`로 연결, 예: `iris:luminance_flash_fail+red_flash_fail`) · `iris_error` |
+| `manifest.jsonl`, JSON | `iris` | `version`(IRIS 커밋), `settings_sha256`, `frames_json`, `luminance_max`/`red_max`(0 통과·1 경고·2 연장 실패·3 실패), `pattern_max`(0·1), `fail_frames`(0부터 센 프레임 번호) |
+| `<split>/*.iris.json` | `luminance`, `red`, `pattern`, … | 프레임별 IRIS 결과 `[T]`. 원본 출력은 `*.iris.csv` |
 | `manifest.jsonl`, JSON | `preview_safe` | 현재 **false**; 표시 적합성 검토 부재 |
 
-`normal` 유형은 합성 변형이 없다는 의미이지 공식 위험 검사를 통과했다는 뜻이 아니다.
+`normal` 유형은 합성 변형이 없다는 의미이지 공식 위험 검사를 통과했다는 뜻이 아니다. `iris_error` 샘플은 학습·평가에서 제외하고, IRIS `pattern` 결과는 위상 민감도 문제로 현재 정답으로 쓰지 않는다([IRIS 계획 5.1절](IRIS_LABELING_PLAN.md)).
 
 ## 4. 수집 및 합성 규약
 
