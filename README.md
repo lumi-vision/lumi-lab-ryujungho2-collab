@@ -1,7 +1,7 @@
 # LUMI — 시공간 국소 보정 연구를 위한 영상 데이터 생성 실험실
 
 > **현재 상태: 데이터 생성 및 GAN 프로토타입 · 2026-11-04**  
-> 개인 연구 저장소(GAN·학습 데이터 합성): `lumi-vision/lumi-lab-ryujungho2-collab` · 짝 저장소(위험 탐지 알고리즘): `lumi-vision/lumi-algo-ryujungho2-collab` · 팀 통합 저장소: `lumi-vision/lumi`
+> 개인 연구 저장소(GAN·학습 데이터 합성): `lumi-vision/lumi-lab-ryujungho2-collab` · 팀 통합 저장소: `lumi-vision/lumi`
 
 **LUMI는 영상 전체를 무조건 흐리게 만들지 않고, 광과민성 관련 위험 특성이 나타나는 시공간적 영역에만 최소한으로 개입하는 보정 기술을 연구하는 프로젝트**다. 이 저장소는 최종 보정기가 아니라 **학습 데이터를 어떻게 생성·검증해야 하는지**를 다루는 개인 실험용 코드와 연구 문서를 보관한다.
 
