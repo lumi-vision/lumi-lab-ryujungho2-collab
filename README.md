@@ -35,10 +35,11 @@ flowchart LR
 | 원본–변형본, ROI 허용 마스크와 시간 파형 생성 | 구현 | `src/lumi/dataset_synthesis.py` |
 | 조건부 3D CNN Generator/Discriminator 및 Hinge GAN 학습 | 구현 | `src/lumi/gan_synthesis.py` |
 | 데이터 배열 형식·ROI 외 보존·원본 해시 기반 분할 감사 | 구현 | `src/lumi/dataset_audit.py` |
+| 정지 이미지 규칙 패턴 스크리닝(줄무늬 5쌍+면적) 및 휘도·적색 특징 v2 | 구현(연구용 스크리닝) | `src/lumi/static_features.py`, `notebooks/image_discriminator_2.ipynb`, `lumi static` |
 | 공식 ITU/WCAG 위험 판정, 위험 기여 마스크 | **미구현** | 향후 별도 평가기 |
 | GAN 학습 수렴/일반화, 국소 보정기, 60FPS 실시간성 | **미검증/미구현** | 실험 계획 참조 |
 
-**코드 테스트:** `python -m pytest -q` 실행 결과 **17 passed, 1 skipped** (2026-11-05, CPU 노트북 — CUDA bf16 시험은 GPU PC에서만 실행). 이 결과는 위험도·화질·실시간 처리 성능을 검증하지 않는다.
+**코드 테스트:** `python -m pytest -q` 실행 결과 **41 passed, 1 skipped** (2026-11-05, CPU 노트북 — CUDA bf16 시험은 GPU PC에서만 실행). 이 결과는 위험도·화질·실시간 처리 성능을 검증하지 않는다.
 
 ## 연구 문서 — 논문처럼 읽는 권장 순서
 
@@ -68,6 +69,12 @@ python -m pytest -q
 python scripts/generate_demo.py --output sample/lumi_demo.avi
 python scripts/build_dataset.py --source sample/lumi_demo.avi --output datasets/oracle --samples 20 --frames 16 --width 128 --height 96 --fps 24 --seed 42
 python scripts/audit_dataset.py --dataset datasets/oracle
+```
+
+정지 이미지 1장의 규칙 패턴 스크리닝(이미지를 화면에 표시하지 않음):
+
+```powershell
+python -m lumi static images/pattern.png --diagonal-inch 27 --distance-cm 60 --mask-out output/mask.png
 ```
 
 `build_dataset.py`는 영상 소스가 복수일 때 `--source`를 반복 지정할 수 있다. `datasets/` 아래 `.npz` 및 `manifest.jsonl`은 `git`에 올리지 않는다. 소스 라이선스를 기록하고, 샘플 영상은 화면에 자동 표시하지 않는다.
