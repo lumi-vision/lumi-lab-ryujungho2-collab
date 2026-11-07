@@ -55,7 +55,8 @@ flowchart LR
 7. [구현 파일별 증거·미구현 목록·한계](docs/IMPLEMENTATION_AUDIT.md)
 8. [문헌·국제 표준 링크](docs/REFERENCES.md) · [관련 연구: GAN·합성 데이터 사례](docs/RELATED_WORK.md)
 9. [G(조건부 생성기) 실험 기록](docs/GAN_EXPERIMENTS.md)
-10. [협업 안내: 무엇을 공유하나 · 노트북/GPU PC 설치 · 팀원 데이터 규약](docs/COLLABORATION.md)
+10. [데이터 대장: 무엇을 어디서 왜 받았나 · 위치 · 보관 기한](docs/DATASETS.md)
+11. [협업 안내: 무엇을 공유하나 · 노트북/GPU PC 설치 · 팀원 데이터 규약](docs/COLLABORATION.md)
 
 ## 시작하기 — Windows 11 / PowerShell
 
