@@ -47,7 +47,7 @@ flowchart LR
 ## 연구 문서 — 논문처럼 읽는 권장 순서
 
 1. [연구 설계서 / 초록·문제 정의·연구 질문·근거](docs/RESEARCH_DESIGN.md)
-2. [PSE 유발 자극의 근거 정리 (패턴·깜빡임·가이드라인 출처·검사 도구)](docs/PSE_EVIDENCE.md)
+2. [논문별 정리: 결과·인사이트·LUMI에서 할 수 있는 것](docs/PAPER_NOTES.md) · [PSE 유발 자극의 근거 정리 (패턴·깜빡임·가이드라인 출처·검사 도구)](docs/PSE_EVIDENCE.md)
 3. [Barbu 원논문과 LUMI GAN의 구조·손실함수·차이 (요약)](docs/BARBU_GAN_REVIEW.md) · [상세 분석](docs/BARBU_GAN_DEEP_DIVE.md)
 4. [데이터셋 구축 및 라벨 규약 — 팀원과의 데이터 규약](docs/DATASET_PROTOCOL.md)
 5. [반증 가능한 가설과 비교 실험/통계 계획](docs/EXPERIMENT_PLAN.md)
