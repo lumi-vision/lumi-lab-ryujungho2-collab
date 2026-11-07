@@ -47,14 +47,15 @@ flowchart LR
 ## 연구 문서 — 논문처럼 읽는 권장 순서
 
 1. [연구 설계서 / 초록·문제 정의·연구 질문·근거](docs/RESEARCH_DESIGN.md)
-2. [Barbu 원논문과 LUMI GAN의 구조·손실함수·차이 (요약)](docs/BARBU_GAN_REVIEW.md) · [상세 분석](docs/BARBU_GAN_DEEP_DIVE.md)
-3. [데이터셋 구축 및 라벨 규약 — 팀원과의 데이터 규약](docs/DATASET_PROTOCOL.md)
-4. [반증 가능한 가설과 비교 실험/통계 계획](docs/EXPERIMENT_PLAN.md)
-5. [IRIS 라벨링 계획과 확인 시험 결과](docs/IRIS_LABELING_PLAN.md)
-6. [구현 파일별 증거·미구현 목록·한계](docs/IMPLEMENTATION_AUDIT.md)
-7. [문헌·국제 표준 링크](docs/REFERENCES.md) · [관련 연구: GAN·합성 데이터 사례](docs/RELATED_WORK.md)
-8. [G(조건부 생성기) 실험 기록](docs/GAN_EXPERIMENTS.md)
-9. [협업 안내: 무엇을 공유하나 · 노트북/GPU PC 설치 · 팀원 데이터 규약](docs/COLLABORATION.md)
+2. [PSE 유발 자극의 근거 정리 (패턴·깜빡임·가이드라인 출처·검사 도구)](docs/PSE_EVIDENCE.md)
+3. [Barbu 원논문과 LUMI GAN의 구조·손실함수·차이 (요약)](docs/BARBU_GAN_REVIEW.md) · [상세 분석](docs/BARBU_GAN_DEEP_DIVE.md)
+4. [데이터셋 구축 및 라벨 규약 — 팀원과의 데이터 규약](docs/DATASET_PROTOCOL.md)
+5. [반증 가능한 가설과 비교 실험/통계 계획](docs/EXPERIMENT_PLAN.md)
+6. [IRIS 라벨링 계획과 확인 시험 결과](docs/IRIS_LABELING_PLAN.md)
+7. [구현 파일별 증거·미구현 목록·한계](docs/IMPLEMENTATION_AUDIT.md)
+8. [문헌·국제 표준 링크](docs/REFERENCES.md) · [관련 연구: GAN·합성 데이터 사례](docs/RELATED_WORK.md)
+9. [G(조건부 생성기) 실험 기록](docs/GAN_EXPERIMENTS.md)
+10. [협업 안내: 무엇을 공유하나 · 노트북/GPU PC 설치 · 팀원 데이터 규약](docs/COLLABORATION.md)
 
 ## 시작하기 — Windows 11 / PowerShell
 
