@@ -32,6 +32,14 @@ def square_flash(hz: float, h: int, w: int, on=(255, 255, 255), off=(0, 0, 0),
     return clip
 
 
+def gray(relative_luminance: float) -> tuple[int, int, int]:
+    """상대 휘도(0~1)를 sRGB 8비트 회색으로 바꾼다."""
+    y = relative_luminance
+    v = 12.92 * y if y <= 0.0031308 else 1.055 * y ** (1 / 2.4) - 0.055
+    g = int(round(v * 255))
+    return (g, g, g)
+
+
 def stripes(h: int, w: int, period: int = 8) -> np.ndarray:
     x = np.arange(w)
     row = np.where((x // (period // 2)) % 2 == 0, 255, 0).astype(np.uint8)
@@ -59,6 +67,14 @@ CASES = [
     ("4b", "stripes_640x480", lambda: stripes(480, 640, period=16), {"pattern_max": 1}),
     ("5", "red_4hz", lambda: square_flash(4, H, W, on=(255, 0, 0)), {"red_max": 3}),
     ("6", "lum_4hz_area10", lambda: square_flash(4, H, W, area=0.10), {"luminance_max": 0}),
+    # 8: 국소 깜빡임. WCAG·ITU 기준(면적 ≥ 25%, 상대 휘도 변화 ≥ 0.1, 어두운 쪽 < 0.8)으로는 모두 실패여야 한다.
+    #    IRIS는 화면 전체 평균 변화(면적 × ΔY)로 판정하는 것으로 보여 8b·8c를 놓친다(IRIS_LABELING_PLAN 5.2).
+    ("8a", "local_a50_dY20", lambda: square_flash(4, H, W, on=gray(0.5), off=gray(0.3), area=0.5),
+     {"luminance_max": 3}),
+    ("8b", "local_a50_dY16", lambda: square_flash(4, H, W, on=gray(0.6), off=gray(0.44), area=0.5),
+     {"luminance_max": 3}),
+    ("8c", "local_a30_dY20", lambda: square_flash(4, H, W, on=gray(0.5), off=gray(0.3), area=0.3),
+     {"luminance_max": 3}),
 ]
 
 

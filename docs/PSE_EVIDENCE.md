@@ -368,6 +368,7 @@ Binnie, Emmett, Gardiner, Harding, Harrison & Wilkins (2002, "Characterizing the
 - **BT.1702-3 스스로:** "가장 민감한 시청자의 위험은 제거할 수 없다."
 - **환자 대상 검증:** 도구나 가이드라인 출력을 환자 EEG·발작 결과와 비교한 연구는 **찾지 못했다.** 간접 증거는 일본 지침 이후 TV 유발 발작 감소(Takahashi & Fujiwara 2004, *Neurology* 62:990–993) [초록], Ofcom 위반 사례 30건(2005–2021), Nomura 2000의 필터 효과(보정 결과이지 검증 아님) 정도다.
 - **LUMI 함의:** IRIS 라벨은 "PSE 위험 정답"이 아니라 **"IRIS 기본 설정의 판정"**이다([IRIS_LABELING_PLAN.md](IRIS_LABELING_PLAN.md) 5.1절의 패턴 불안정 결과와 함께 볼 것).
+- **IRIS 자체 시험 (2026-11-07):** pse-test-media 110개에서 기대 통과 72/74는 맞췄지만 **기대 실패는 3/36만** 실패로 판정했다. 소스 확인 결과 IRIS 휘도 판정은 깜빡이는 영역이 아니라 **화면 전체 평균 휘도 변화**를 문턱 0.1과 비교한다. 따라서 국소 깜빡임(예: 화면 50%에서 ΔY 0.16)을 놓친다. 상세는 [IRIS_LABELING_PLAN.md](IRIS_LABELING_PLAN.md) 5.2절.
 
 ## 9. 원문 오류와 문헌 간 불일치
 
