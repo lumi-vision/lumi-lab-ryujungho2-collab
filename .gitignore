@@ -12,3 +12,6 @@ data/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+
+# 개인 편집기 설정
+.vscode/
