@@ -24,13 +24,13 @@
 
 | 영화 | 파일 | 받는 주소 | 크기(바이트) | 라이선스 |
 |---|---|---|---|---|
-| Big Buck Bunny (2008) | `BigBuckBunny_640x360.m4v` | https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v | 121,283,919 | CC BY 3.0 |
+| Big Buck Bunny (2008) | `BigBuckBunny_640x360.m4v` | https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip (zip 안에 영상 1개) | 121,283,919 | CC BY 3.0 |
 | Elephants Dream (2006) | `elephantsdream-480-h264-st-aac.mov` | https://download.blender.org/ED/elephantsdream-480-h264-st-aac.mov | 103,636,531 | CC BY 2.5 |
 | Sintel (2010) | `Sintel.2010.1080p.mkv` | https://download.blender.org/durian/movies/Sintel.2010.1080p.mkv | 1,180,090,590 | CC BY 3.0 |
 | Tears of Steel (2012) | `tears_of_steel_720p.mov` | https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov | 372,178,639 | CC BY 3.0 |
 
 - 출처 표기: "© Blender Foundation | www.blender.org"
-- 검증: 공식 서버가 알려준 크기와 받은 파일 크기를 비교했습니다. Elephants Dream, Sintel, Tears of Steel은 바이트 단위까지 일치했습니다. Big Buck Bunny는 서버가 크기를 알려주지 않아 비교하지 못했습니다.
+- 검증: 공식 서버가 알려준 크기와 받은 파일 크기를 비교했습니다. Elephants Dream, Sintel, Tears of Steel은 바이트 단위까지 일치했습니다. Big Buck Bunny는 2026-11-08에 서버가 `.m4v` 대신 `.zip`으로만 제공하도록 바뀌었습니다. zip을 다시 받아 풀어 보니 안의 영상 SHA256이 아래 값과 같았습니다.
 
 SHA256:
 
@@ -44,7 +44,7 @@ efa9062d9cdb7a338e40ad530dfdf234806743f29ae6a1a136b97ece4e588e8f  tears_of_steel
 다시 받는 법:
 
 ```bash
-curl -LRO https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v
+curl -LRO https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip && unzip BigBuckBunny_640x360.m4v.zip
 curl -LRO https://download.blender.org/ED/elephantsdream-480-h264-st-aac.mov
 curl -LRO https://download.blender.org/durian/movies/Sintel.2010.1080p.mkv
 curl -LRO https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov
