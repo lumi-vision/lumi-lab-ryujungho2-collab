@@ -1,34 +1,65 @@
-"""측정 함수가 정답이 뻔한 신호에서 맞게 세는지 확인한다."""
+"""측정 함수(ITU 방식)가 정답이 뻔한 영상에서 맞게 재는지 확인한다.
+
+시험 영상은 48×64 회색 화면. 회색값 30 ≈ 2.6 cd/m²(어두움), 200 ≈ 116 cd/m²(밝음).
+"""
 import numpy as np
 
-from lumi_synth.measure import count_transitions, max_flashes_per_second, relative_luminance_bgr
+from lumi_synth.measure import analyze, luminance_cd
+
+FPS = 24
+H, W = 48, 64
+DARK, BRIGHT = 30, 200
 
 
-def square_wave(fps=24, secs=3, hz=5, lo=0.05, hi=0.6):
-    t = np.arange(fps * secs) / fps
-    return np.where((t * hz * 2).astype(int) % 2 == 0, lo, hi)
+def flicker_video(hz=5, secs=3, area=1.0, lo=DARK, hi=BRIGHT):
+    """화면 왼쪽부터 area 비율만큼의 띠가 hz로 lo↔hi를 오가는 영상. 나머지는 lo로 고정."""
+    t = np.arange(FPS * secs) / FPS
+    on = (t * hz * 2).astype(int) % 2 == 1
+    v = np.full((len(t), H, W, 3), lo, dtype=np.uint8)
+    cols = int(round(W * area))
+    v[on, :, :cols] = hi
+    return v
 
 
-def test_luminance_black_white():
+def test_luminance_black_white_is_0_and_200():
     px = np.array([[0, 0, 0], [255, 255, 255]], dtype=np.uint8)
-    y = relative_luminance_bgr(px)
-    assert y[0] == 0.0 and abs(y[1] - 1.0) < 1e-6
+    y = luminance_cd(px)
+    assert y[0] == 0.0 and abs(y[1] - 200.0) < 1e-3
 
 
-def test_flat_signal_has_no_flash():
-    assert max_flashes_per_second(np.full(120, 0.3), 24) == 0
+def test_static_video_has_no_flash():
+    r = analyze(np.full((72, H, W, 3), 120, dtype=np.uint8), FPS)
+    assert r["max_flashes"] == 0 and not r["dangerous"]
 
 
-def test_square_wave_5hz_counts_5_flashes():
-    # 24fps에서 정확히 5Hz는 안 나눠떨어지므로 근사: 4.5~5.5 사이
-    f = max_flashes_per_second(square_wave(hz=5), 24)
-    assert 4.5 <= f <= 6
+def test_fullscreen_5hz_is_dangerous():
+    r = analyze(flicker_video(hz=5), FPS)
+    assert 4.5 <= r["max_flashes"] <= 6 and r["dangerous"]
+
+
+def test_fullscreen_2hz_is_safe():
+    r = analyze(flicker_video(hz=2), FPS)
+    assert 1.5 <= r["max_flashes"] <= 2.5 and not r["dangerous"]
+
+
+def test_area_30_percent_is_dangerous():
+    r = analyze(flicker_video(hz=5, area=0.30), FPS)
+    assert abs(r["peak_area"] - 0.30) < 0.02 and r["dangerous"]
+
+
+def test_area_20_percent_is_safe():
+    # 깜빡임은 빠르지만 면적이 25% 이하라 화면 전이로 세지 않음
+    r = analyze(flicker_video(hz=5, area=0.20), FPS)
+    assert abs(r["peak_area"] - 0.20) < 0.02 and r["max_flashes"] == 0 and not r["dangerous"]
 
 
 def test_small_change_is_ignored():
-    assert len(count_transitions(square_wave(lo=0.30, hi=0.35))) == 0
+    # 회색 120 ↔ 128: 약 6 cd/m² 차이로 20 미만
+    r = analyze(flicker_video(hz=5, lo=120, hi=128), FPS)
+    assert r["peak_area"] == 0
 
 
 def test_bright_side_only_is_ignored():
-    # 두 상태 모두 0.8 이상(어두운 쪽이 0.8 이상)이면 기준상 전이가 아님
-    assert len(count_transitions(square_wave(lo=0.85, hi=0.99))) == 0
+    # 회색 235 ↔ 255: 어두운 쪽도 약 166 cd/m²로 160 이상
+    r = analyze(flicker_video(hz=5, lo=235, hi=255), FPS)
+    assert r["peak_area"] == 0
