@@ -61,6 +61,54 @@ def max_flashes_per_second(events: np.ndarray, n_frames: int, fps: float) -> flo
     return best / 2.0
 
 
+def criteria_report(frames_bgr: np.ndarray, fps: float) -> list[dict]:
+    """ITU 위험 조건을 하나씩 따로 재서, 어느 조건이 넘었고 어느 조건이 무너졌는지 표로 돌려준다.
+
+    위험은 아래 세 조건을 "모두" 넘을 때만 성립한다(docs/CRITERIA.md).
+    1. 밝기: 한 픽셀의 밝기 변화폭 ≥ 20 cd/m², 그리고 어두운 쪽 < 160 cd/m²
+    2. 횟수: 한 픽셀 기준으로 아무 1초에 깜빡임 > 3번 (면적과 무관하게 잼)
+    3. 면적: 같은 프레임에 전이한 픽셀이 화면의 > 25%
+    그리고 세 조건을 합친 최종 판정(화면 기준 1초 최대 깜빡임 > 3번)을 마지막 줄에 둔다.
+    """
+    lum = luminance_cd(frames_bgr)
+    lo, hi = lum.min(axis=0), lum.max(axis=0)
+    swing = hi - lo
+    eligible = lo < DARK_LIMIT_CD
+    if eligible.any():
+        k = np.unravel_index(np.argmax(np.where(eligible, swing, -1)), swing.shape)
+        max_swing, dark = float(swing[k]), float(lo[k])
+    else:
+        max_swing, dark = 0.0, float(lo.min())
+
+    trans = pixel_transitions(lum)
+    ever = trans.any(axis=0)
+    pixel_flashes = 0.0
+    if ever.any():
+        sub = trans[:, ever].astype(np.uint16)                  # T × (전이가 있었던 픽셀 수)
+        csum = np.vstack([np.zeros((1, sub.shape[1]), np.uint16), np.cumsum(sub, axis=0, dtype=np.uint16)])
+        win = int(round(fps))
+        t = len(lum)
+        window_counts = csum[np.minimum(np.arange(t) + win, t)] - csum[:t]
+        pixel_flashes = float(window_counts.max()) / 2.0
+
+    area = trans.mean(axis=(1, 2))
+    peak_area = float(area.max())
+    events = np.flatnonzero(area > AREA_LIMIT)
+    screen_flashes = max_flashes_per_second(events, len(lum), fps)
+
+    lum_ok = max_swing >= DELTA_CD and dark < DARK_LIMIT_CD
+    return [
+        {"조건": "1. 밝기 변화폭", "측정값": f"{max_swing:.1f} cd/m² (어두운 쪽 {dark:.1f})",
+         "기준": f"≥ {DELTA_CD:g} cd/m², 어두운 쪽 < {DARK_LIMIT_CD:g}", "넘음": lum_ok},
+        {"조건": "2. 깜빡임 횟수 (픽셀 기준)", "측정값": f"1초 최대 {pixel_flashes:g}번",
+         "기준": f"> {MAX_FLASHES_PER_SEC}번", "넘음": pixel_flashes > MAX_FLASHES_PER_SEC},
+        {"조건": "3. 동시 전이 면적", "측정값": f"최대 {peak_area:.2%}",
+         "기준": f"> {AREA_LIMIT:.0%}", "넘음": peak_area > AREA_LIMIT},
+        {"조건": "최종: 1+2+3 모두 (화면 기준 깜빡임)", "측정값": f"1초 최대 {screen_flashes:g}번",
+         "기준": f"> {MAX_FLASHES_PER_SEC}번이면 위험", "넘음": screen_flashes > MAX_FLASHES_PER_SEC},
+    ]
+
+
 def analyze(frames_bgr: np.ndarray, fps: float) -> dict:
     """영상(T×H×W×3, BGR)을 ITU 방식으로 재서 결과를 돌려준다.
 

@@ -6,6 +6,7 @@ LUMI 프로젝트 개인 실험 저장소입니다. 2026-11-08에 처음부터 �
 - 초기화 전 작업 전체: 브랜치 [`archive/2026-11-08-before-reset`](https://github.com/lumi-vision/lumi-lab-ryujungho2-collab/tree/archive/2026-11-08-before-reset) (태그 `before-reset-2026-11-08`)
 
 - 작업 설계: [PLAN.md](PLAN.md). 깜빡임 학습 데이터와 정답지를 규칙 기반으로 합성합니다.
+- 판정 기준: [docs/CRITERIA.md](docs/CRITERIA.md) · 계산법: [docs/BASICS.md](docs/BASICS.md)
 
 ## 처음 설치 (PowerShell)
 

@@ -4,7 +4,7 @@
 """
 import numpy as np
 
-from lumi_synth.measure import analyze, luminance_cd
+from lumi_synth.measure import analyze, criteria_report, luminance_cd
 
 FPS = 24
 H, W = 48, 64
@@ -63,3 +63,31 @@ def test_bright_side_only_is_ignored():
     # 회색 235 ↔ 255: 어두운 쪽도 약 166 cd/m²로 160 이상
     r = analyze(flicker_video(hz=5, lo=235, hi=255), FPS)
     assert r["peak_area"] == 0
+
+
+# ---- 기준별 판정표: pse-test-media의 f / a / c / l 설계를 흉내 낸 영상으로, 무너진 조건이 정확히 짚이는지 ----
+
+def passed(report):
+    return [row["넘음"] for row in report]
+
+
+def test_report_f_all_conditions_exceeded():
+    # 회색 64 ↔ 109 (10.3 ↔ 30.6 cd/m², 변화 20.3), 면적 30%, 초당 5번
+    r = criteria_report(flicker_video(hz=5, area=0.30, lo=64, hi=109), FPS)
+    assert passed(r) == [True, True, True, True]
+
+
+def test_report_a_area_fails():
+    r = criteria_report(flicker_video(hz=5, area=0.20, lo=64, hi=109), FPS)
+    assert passed(r) == [True, True, False, False]
+
+
+def test_report_c_count_fails():
+    r = criteria_report(flicker_video(hz=2, area=0.30, lo=64, hi=109), FPS)
+    assert passed(r) == [True, False, True, False]
+
+
+def test_report_l_luminance_fails():
+    # 회색 64 ↔ 100: 약 25.4 - 10.3 = 15 cd/m² 변화로 20 미만
+    r = criteria_report(flicker_video(hz=5, area=0.30, lo=64, hi=100), FPS)
+    assert passed(r)[0] is False and passed(r)[3] is False
