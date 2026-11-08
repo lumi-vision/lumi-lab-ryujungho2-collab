@@ -50,6 +50,18 @@ curl -LRO https://download.blender.org/durian/movies/Sintel.2010.1080p.mkv
 curl -LRO https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov
 ```
 
+### 1-1. 실제로 쓰는 원본: Big Buck Bunny 1080p (2026-11-08)
+
+공간 패턴(pse-test-media)이 1920×1080이라 같은 해상도의 원본을 씁니다. `scripts/step0_check.py`가 파일이 없으면 자동으로 받습니다.
+
+| 항목 | 내용 |
+|---|---|
+| 받는 주소 | https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_h264.mov.zip (zip 725,106,348 바이트, 안에 영상 1개) |
+| 파일 | `big_buck_bunny_1080p_h264.mov`, 725,106,140 바이트, 1920×1080, 24 fps, 14,315프레임 |
+| SHA256 | `dc2146a2b1172def56730143ad80cd1825b7fad15f1fc9c23a4e7d01a741ac11` |
+| 라이선스 | CC BY 3.0, © Blender Foundation |
+| 위치 | `data/sources/big_buck_bunny_1080p/` (Git 제외) |
+
 ## 2. South, Saffo & Borkin (2021) 소셜미디어 GIF·영상
 
 | 항목 | 내용 |
