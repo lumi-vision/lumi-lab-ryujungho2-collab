@@ -2,3 +2,5 @@ numpy>=2.3
 opencv-python>=4.12
 matplotlib>=3.10
 pytest>=8
+# 이 저장소의 src/lumi_synth 를 .venv에 연결 설치 (코드를 고치면 바로 반영됨)
+-e .

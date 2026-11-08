@@ -15,3 +15,5 @@ __pycache__/
 
 # 개인 편집기 설정
 .vscode/
+*.egg-info/
+.pytest_cache/

@@ -9,7 +9,6 @@
 
 사용: .venv\\Scripts\\python scripts\\step1_cut.py
 """
-import sys
 from pathlib import Path
 
 import cv2
@@ -17,13 +16,13 @@ import matplotlib
 import numpy as np
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 from lumi_synth.measure import (  # noqa: E402
     DELTA, MAX_FLASHES_PER_SEC, count_transitions, max_flashes_per_second, relative_luminance_bgr,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 SRC = ROOT / "data/sources/big_buck_bunny/BigBuckBunny_640x360.m4v"
 OUT_VIDEO = ROOT / "data/clips/bbb_clip01.mkv"
