@@ -5,7 +5,7 @@ LUMI 프로젝트 개인 실험 저장소입니다. 2026-11-08에 처음부터 �
 - 데이터 출처: [DATA_SOURCES.md](DATA_SOURCES.md)
 - 초기화 전 작업 전체: 브랜치 [`archive/2026-11-08-before-reset`](https://github.com/lumi-vision/lumi-lab-ryujungho2-collab/tree/archive/2026-11-08-before-reset) (태그 `before-reset-2026-11-08`)
 
-- 작업 설계: [PLAN.md](PLAN.md). 깜빡임 학습 데이터와 정답지를 규칙 기반으로 합성합니다.
+- **작업 설계 (지금 진행 중)**: [PLAN.md](PLAN.md). 휘도·적색·줄무늬 위험 영상을 의도대로 합성할 수 있는지, 우리 판정기와 팀원 판별기로 전·후 검사합니다.
 - 판정 기준: [docs/CRITERIA.md](docs/CRITERIA.md) · 계산법: [docs/BASICS.md](docs/BASICS.md)
 
 ### 2026-11-09 추가: 규칙 명세 · 오라클 · GAN
@@ -15,7 +15,7 @@ LUMI 프로젝트 개인 실험 저장소입니다. 2026-11-08에 처음부터 �
 - **환경·해상도 차이 문제와 판정 해상도 제안**: [docs/RESOLUTION_ENV_REPORT.md](docs/RESOLUTION_ENV_REPORT.md)
 - 판정 규칙 수식 명세와 설계 결정 D1~D4: [docs/RULES_SPEC.md](docs/RULES_SPEC.md)
 - **2026-11-09 변경 기록(무엇·어떻게·왜·결과)**: [docs/CHANGELOG_2026-11-09.md](docs/CHANGELOG_2026-11-09.md)
-- **집 PC 에서 할 일**: [docs/HOME_NEXT_STEPS.md](docs/HOME_NEXT_STEPS.md)
+- 집 PC 에서 할 일 (⏸ 보류, PLAN 먼저): [docs/HOME_NEXT_STEPS.md](docs/HOME_NEXT_STEPS.md)
 - 오라클(규칙 기반 합성): [docs/ORACLE.md](docs/ORACLE.md) · GAN: [docs/GAN.md](docs/GAN.md) · 학습 데이터 계획: [docs/DATA_PLAN.md](docs/DATA_PLAN.md)
 - 실측 결과: `checks/rules/`, `checks/oracle/`, `checks/gan/`
 
