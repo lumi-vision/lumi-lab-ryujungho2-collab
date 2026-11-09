@@ -181,7 +181,7 @@ ITU-R BT.1702 -0·-1·-2판에는 패턴 수치가 없고, -3판(2023)에서 처
 | 어두운 줄 | < 160 cd/m² | < 160 cd/m² | **원문** | 같음 |
 | 면적 (정지) | > 40% | > 40% | **원문** | ITU-3·Ofcom. 단 Wilkins 2005는 "불필요하게 제한적, 유도 근거 없음"이라고 비판 |
 | 면적 (변화) | > 25% | > 25% | **원문** | ITU-3·Ofcom |
-| 공간 주파수 | **1~8 cpd** (2026-11-10 변경, 이전 1~10) | 없음 | **합의 문헌** | 실험·모델·표준·도구 어디에도 없음. 팀원 코드에서 출처 표기 없이 들어옴. 인용 가능한 대안: **EF 2026 합의문 "~1–8 cycles per degree"** (Fisher 외 2026, Epilepsia 67:565, doi:10.1111/epi.18702, Wilkins 1979 인용). 실험 최적 대역은 1~4 cpd(Wilkins 1979), 8 cpd 초과 환자 자료는 없음. 자세히: [PATTERN_LITERATURE.md](PATTERN_LITERATURE.md) |
+| 공간 주파수 | **1~8 cpd** (2026-11-10 변경, 이전 1~10) | 없음 | **합의 문헌** | 이전 값 1~10은 실험·모델·표준·도구 어디에도 없었음(팀원 코드에서 출처 없이 들어옴). 지금 근거: **EF 2026 합의문 "~1–8 cycles per degree"** (Fisher 외 2026, Epilepsia 67:565, doi:10.1111/epi.18702, Wilkins 1979 인용). 실험 최적 대역은 1~4 cpd(Wilkins 1979), 8 cpd 초과 환자 자료는 없음. 자세히: [PATTERN_LITERATURE.md](PATTERN_LITERATURE.md) |
 | 시청 거리 | 56 cm | | **문헌 간접** | Jordan & Vanderheiden 2024 표 2: "15-in. computer display **(4:3)** viewed at 56 cm" (WCAG의 "15–17 inch at 22–26 inches"에서 유래). **우리와 팀원 코드는 15인치 16:9로 계산** → 화면 비율이 원문과 다름 |
 | 시청 거리 (데스크톱, 팀원) | 68 cm | | **문헌 간접** | 같은 표: "19-in. (4:3) viewed at 68.0 cm" (Shin & Hegde 2010, Human Factors 52:574) |
 | 움직임 판정 | 정지/반전/흐름 3분류 (시간 에너지 10%, \|DI\| 0.5) | 없음 | **구현 선택** (분류 필요성은 실험 근거: Binnie 1985) | 어떤 표준에도 정량 기준이 없음. 시험 결과: [checks/pattern/motion_classes.md](../checks/pattern/motion_classes.md). J&V 2024 원문: "there is no specific, actionable guidance available on motion compensation thresholds" |
