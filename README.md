@@ -11,6 +11,7 @@ LUMI 프로젝트 개인 실험 저장소입니다. 2026-11-08에 처음부터 �
 ### 2026-11-09 추가: 규칙 명세 · 오라클 · GAN
 
 - **전체 흐름(먼저 읽기)**: [docs/WORKFLOW.md](docs/WORKFLOW.md)
+- **연구 흐름(논문 순서) 정리**: [docs/RESEARCH_NARRATIVE.md](docs/RESEARCH_NARRATIVE.md)
 - 판정 규칙 수식 명세와 설계 결정 D1~D4: [docs/RULES_SPEC.md](docs/RULES_SPEC.md)
 - **2026-11-09 변경 기록(무엇·어떻게·왜·결과)**: [docs/CHANGELOG_2026-11-09.md](docs/CHANGELOG_2026-11-09.md)
 - **집 PC 에서 할 일**: [docs/HOME_NEXT_STEPS.md](docs/HOME_NEXT_STEPS.md)
