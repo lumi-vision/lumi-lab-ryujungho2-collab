@@ -222,27 +222,43 @@ def analyze(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
 #
 #   ⑤ 줄무늬 쌍     화면을 12방향(0°~165°, 15° 간격)으로 1픽셀 간격 직선을 그어 휘도 프로파일을 얻고,
 #                  20 cd/m² 히스테리시스로 '밝은 줄·어두운 줄' 극값을 찾는다. 이웃 극값 사이(줄 하나)가
-#                  (어두운 쪽 < 160) 이고 (공간 주파수 1~10 cpd) 이면 '유효한 줄'. 유효한 줄이 끊김 없이
+#                  (어두운 쪽 < 160) 이고 (공간 주파수 1~8 cpd) 이면 '유효한 줄'. 유효한 줄이 끊김 없이
 #                  10개(밝은 5 + 어두운 5 = 5쌍) 이상 이어진 구간의 픽셀을 그 프레임의 '줄무늬 픽셀'로 표시.
-#   ⑥ 움직임        줄무늬 픽셀 중 ±0.5초 안에 픽셀 전이(②)가 있었던 비율 ≥ 10% 면 '움직이는 줄무늬'.
-#   ⑦ 면적          줄무늬 픽셀 면적 > 25%(움직임) 또는 > 40%(멈춤) 이면 그 프레임은 '줄무늬 후보'.
+#   ⑥ 움직임 3분류  줄무늬에 수직인 방향의 '위치 × 시간' 휘도 단면을 ±0.5초 창에서 2차원 푸리에 변환해
+#                  (가) 시간 변화 에너지 비율 < 10%                → 정지(static)
+#                  (나) 방향 지수 |DI| ≥ 0.5 (한 방향 성분에 몰림)  → 흐름(drifting)
+#                  (다) 그 밖 (양방향 대칭 = 진동·반전·점멸)       → 반전(reversing)
+#                  DI = (E_한방향 − E_반대방향) / (E_한방향 + E_반대방향)  (운동 에너지, Adelson & Bergen 1985)
+#   ⑦ 면적          정지 > 40%, 반전 > 25%, 흐름은 제외(ITU·Ofcom 원문) 이면 그 프레임은 '줄무늬 후보'.
 #   ⑧ 위험          아무 1초 창 안의 후보 프레임이 0.5초 이상(≥ ceil(W/2) 프레임)이면 위험.
 #
-# 출처 구분 (논문에 그대로 쓸 것)
-#   ITU 원문:   면적 25%(움직임)/40%(멈춤), 명암은 깜빡임과 같은 기준(ΔL ≥ 20, 어두운 쪽 < 160), 모든 방향
-#   팀원 판정기(lumi-lab-rockrovks vdcoreops_v2.py, 2026-11-09) 기준을 따름 — 사용자 결정 2026-11-09:
-#               5쌍 이상(ITU 원문은 'more than five' = 6쌍 이상, 우리가 1쌍 보수적), 1~10 cpd,
-#               시청 조건(노트북 56 cm, 15인치 16:9), 12방향 15° 간격, 지속 0.5초
-#   LUMI 결정:  극값 히스테리시스 20 cd/m²(팀원 5), 쌍 수 = (극값 수)//2, 줄무늬 픽셀과 면적을 같은 구간에서 잼
-#               (팀원은 고대비 밀도로 면적을 따로 잼), 화면 전체를 1픽셀 간격으로 스캔(팀원은 중앙 60개 직선),
-#               움직임 판정 10%
-#   미구현:     '한 방향으로 매끄럽게 흘러가는 패턴은 제외'(ITU) — 흐름도 움직임으로 봐서 25% 를 적용(보수적)
+# 출처 구분 (논문에 그대로 쓸 것 · 자세히: docs/PATTERN_LITERATURE.md, docs/STANDARDS.md §3)
+#   표준 원문:  면적 정지 40% / 변화 25%, 한 방향 흐름 제외("obviously flow smoothly across, into, or out of
+#               the screen in one direction"), 명암은 깜빡임과 같은 기준(ΔL ≥ 20, 어두운 쪽 < 160), 모든 방향
+#               (ITC 2001 → Ofcom 2005·2017 → ITU-R BT.1702-3 Attachment 1)
+#   합의 문헌:  1~8 cpd — EF 개정 합의문 Fisher·Wilkins 외 2026, Epilepsia 67:565, doi:10.1111/epi.18702
+#               ("oscillating or static stripes of ~1-8 cycles per visual degree", Wilkins 1979 인용).
+#               2026-11-10 이전 값 1~10 cpd 는 어떤 문헌에서도 출처를 찾지 못해 바꿈.
+#               지속 0.5초 — EFA 2005·Wilkins 2005 (경험값, 실험 근거 없음을 저자가 명시)
+#   실험 근거:  움직임 3분류의 필요성 — Binnie, Findlay & Wilkins 1985(환자 10명): 진동 15 Hz PPR 0.97,
+#               정지 0.38, 한 방향 흐름 2.5~10°/s 0~0.04. 진동과 흐름은 한 점의 밝기 변화 주파수가 같아도
+#               위험이 정반대라, 픽셀 밝기 변화만으로는 구분할 수 없음 → 방향 에너지로 구분
+#   팀원 판정기를 따른 것: 5쌍 이상(원문은 'more than five' = 6쌍 이상, 1쌍 보수적), 시청 조건 56 cm·15인치
+#               (원문 출처 J&V 2024 표 2는 15인치 4:3 — 여기서는 16:9로 계산), 12방향 15° 간격
+#   LUMI 구현 선택 (근거 없음, 민감도 분석 대상): 정지 판정 시간 에너지 10%, 흐름 판정 |DI| 0.5,
+#               극값 히스테리시스 20 cd/m²(팀원 5), 줄무늬 픽셀과 면적을 같은 구간에서 잼, 화면 전체 스캔
+#   한계:       30 fps 에서 시간 주파수 15 Hz(나이퀴스트)는 방향을 알 수 없어 '반전'으로 분류됨(보수적).
+#               진동 15 Hz 같은 Binnie 조건은 30 fps 영상으로 표현 자체가 안 됨.
 # =============================================================================================
 PATTERN_MIN_PAIRS = 5             # 밝은·어두운 줄 쌍이 이 수 '이상'(≥)이면 줄무늬 (ITU 는 > 5)
-PATTERN_AREA_DYNAMIC = 0.25       # 움직이는 줄무늬 면적 한계, 경계 제외(>)
-PATTERN_AREA_STATIC = 0.40        # 멈춘 줄무늬 면적 한계, 경계 제외(>)
-PATTERN_CPD = (1.0, 10.0)         # 위험 공간 주파수 (cycles per degree), 경계 포함
-PATTERN_DYNAMIC_FRAC = 0.10       # 줄무늬 픽셀 중 ±0.5초 안에 전이한 비율이 이 값 이상이면 '움직임'
+PATTERN_AREA_DYNAMIC = 0.25       # 반전(진동·점멸·명암 반전) 줄무늬 면적 한계, 경계 제외(>) — 원문
+PATTERN_AREA_STATIC = 0.40        # 정지 줄무늬 면적 한계, 경계 제외(>) — 원문
+PATTERN_DRIFT_EXEMPT = True       # 한 방향으로 매끄럽게 흐르는 줄무늬는 제외 — 원문 (False 면 25% 적용)
+PATTERN_CPD = (1.0, 8.0)          # 위험 공간 주파수 (cycles per degree), 경계 포함 — EF 2026 합의
+MOTION_STATIC_MAX = 0.10          # 시간 변화 에너지 비율이 이 값 미만이면 정지 — 구현 선택
+MOTION_DRIFT_MIN_DI = 0.5         # 방향 지수 |DI| 가 이 값 이상이면 흐름 — 구현 선택
+MOTION_ROWS = 64                  # 움직임 판정에 쓰는 스캔 직선 수 (계산량 제한)
+PATTERN_DYNAMIC_FRAC = MOTION_STATIC_MAX   # (호환용 옛 이름)
 PATTERN_MIN_SEC = 0.5             # 1초 창 안의 줄무늬 후보 프레임이 이 시간 이상이면 위험
 PATTERN_ANGLES = tuple(range(0, 180, 15))   # 스캔 방향 (도)
 VIEW_DISTANCE_CM = 56.0           # 노트북 표준 시청 거리 (팀원 판정기와 같음)
@@ -303,14 +319,19 @@ def _sample(lum: np.ndarray, mx: np.ndarray, my: np.ndarray, valid: np.ndarray) 
     return out
 
 
-def stripe_runs(profiles: np.ndarray, ppd: float) -> np.ndarray:
+def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
     """⑤ 휘도 프로파일 여러 줄(N×M, NaN = 끊김) → 줄무늬로 판정된 표본 (N×M bool).
+
+    return_cpd=True 이면 (bool, 구간의 평균 cpd N×M float) 을 돌려준다(줄무늬 아닌 곳은 0).
 
     극값 찾기 (히스테리시스 20 cd/m², 시간축 픽셀 전이 ②와 같은 방식):
       현재 극값에서 같은 방향으로 더 가면 극값을 옮기고(평평한 줄은 처음 닿은 곳),
       반대 방향으로 20 이상 물러나면 현재 극값을 '확정'하고 방향을 바꾼다.
     극값이 확정될 때마다 직전 극값과의 사이 = 줄 하나(반 주기 h 표본)를 검사한다:
-      유효 ⇔ min(두 극값) < 160 이고 1 ≤ ppd / (2h) ≤ 10 (cpd).
+      유효 ⇔ min(두 극값) < 160 이고 ppd / (2h) ≥ 1 (cpd 하한만).
+    상한(8 cpd)은 여기서 자르지 않는다: 비스듬한 스캔 방향에서는 줄 간격이 1/cos(Δθ) 배로 넓어 보여
+    실제보다 낮은 cpd 로 재진다. 그래서 stripe_masks 가 모든 방향의 cpd 중 최댓값(= 줄에 수직인 방향의 값)으로
+    상한을 판정한다 (2026-11-10: 이전 구현은 방향마다 상한을 잘라서, 10 cpd 줄무늬도 비스듬한 방향에서 통과했음).
     유효한 줄이 k 개 이어지면 극값은 k+1 개, 쌍 수 = (k+1)//2. 5쌍 ⇔ k ≥ 9.
     줄무늬 구간 = 그 연속 구간의 첫 극값부터 마지막 극값 + 마지막 줄 폭까지.
     """
@@ -325,7 +346,8 @@ def stripe_runs(profiles: np.ndarray, ppd: float) -> np.ndarray:
     cur = np.full(n, np.nan); cur_i = np.zeros(n, np.int64)  # 추적 중인 극값
     prev = np.full(n, np.nan); prev_i = np.full(n, -1, np.int64)  # 확정된 직전 극값
     k = np.zeros(n, np.int64); run_start = np.zeros(n, np.int64)
-    segs = []                                               # (줄 번호, 시작, 끝) — 5쌍 이상 구간
+    run_hsum = np.zeros(n)                                  # 연속 구간의 반 주기 합 (평균 cpd 계산용)
+    segs = []                                               # (줄 번호, 시작, 끝, cpd) — 5쌍 이상 구간
 
     def confirm(rows: np.ndarray) -> None:
         """rows 의 '현재 극값'을 확정: 직전 극값과의 줄 하나를 검사하고 연속 구간을 갱신."""
@@ -334,13 +356,15 @@ def stripe_runs(profiles: np.ndarray, ppd: float) -> np.ndarray:
             half = (cur_i[has_prev] - prev_i[has_prev]).astype(np.float64)
             cpd = ppd / (2.0 * np.maximum(half, 1e-9))
             ok = (np.minimum(cur[has_prev], prev[has_prev]) < DARK_LIMIT_CD) & \
-                 (cpd >= PATTERN_CPD[0]) & (cpd <= PATTERN_CPD[1])
+                 (cpd >= PATTERN_CPD[0])
             start_new = ok & (k[has_prev] == 0)
             run_start[has_prev[start_new]] = prev_i[has_prev[start_new]]
+            run_hsum[has_prev] = np.where(ok, run_hsum[has_prev] + half, 0.0)
             k[has_prev] = np.where(ok, k[has_prev] + 1, 0)
             hit = has_prev[ok & (k[has_prev] >= need)]
             if hit.size:
-                segs.append((hit, run_start[hit].copy(), cur_i[hit] + (cur_i[hit] - prev_i[hit])))
+                seg_cpd = ppd / (2.0 * run_hsum[hit] / k[hit])
+                segs.append((hit, run_start[hit].copy(), cur_i[hit] + (cur_i[hit] - prev_i[hit]), seg_cpd))
         prev[rows], prev_i[rows] = cur[rows], cur_i[rows]
 
     for j in range(m + 1):
@@ -381,28 +405,108 @@ def stripe_runs(profiles: np.ndarray, ppd: float) -> np.ndarray:
                 cur[rev], cur_i[rev] = v[rev], j
                 direction[rev] = -direction[rev]
 
-    for rows, s, e in segs:                                   # 구간 표시 (겹치면 합집합)
-        for r, a0, b0 in zip(rows.tolist(), s.tolist(), e.tolist()):
+    out_cpd = np.zeros((n, m + 1))
+    for rows, s, e, c in segs:                                # 구간 표시 (겹치면 합집합, cpd 는 최댓값)
+        for r, a0, b0, cc in zip(rows.tolist(), s.tolist(), e.tolist(), c.tolist()):
             out[r, a0:min(b0, m)] = True
+            out_cpd[r, a0:min(b0, m)] = np.maximum(out_cpd[r, a0:min(b0, m)], cc)
+    if return_cpd:
+        return out[:, :m], out_cpd[:, :m]
     return out[:, :m]
 
 
 def stripe_masks(lum: np.ndarray) -> np.ndarray:
-    """⑤ 휘도(T×H×W) → 프레임별 줄무늬 픽셀 (T×H×W bool). 12방향의 합집합."""
+    """⑤ 휘도(T×H×W) → 프레임별 줄무늬 픽셀 (T×H×W bool). 12방향의 합집합.
+
+    픽셀마다 모든 방향에서 잰 cpd 의 최댓값(= 줄에 수직인 방향의 cpd)이 PATTERN_CPD 안이어야 줄무늬로 인정.
+    """
     t_len, h, w = lum.shape
     mask = np.zeros(lum.shape, dtype=bool)
+    cpd_max = np.zeros(lum.shape, dtype=np.float32)
     for ang in PATTERN_ANGLES:
         mx, my, valid = _scan_maps(h, w, ang)
         prof = _sample(lum, mx, my, valid)                   # T×Hc×Wc
         hc, wc = prof.shape[1:]
-        runs = stripe_runs(prof.reshape(t_len * hc, wc), pixels_per_degree(w, h, ang)).reshape(t_len, hc, wc)
-        runs &= valid[None]
+        runs, cpd = stripe_runs(prof.reshape(t_len * hc, wc), pixels_per_degree(w, h, ang), return_cpd=True)
+        runs = runs.reshape(t_len, hc, wc) & valid[None]
+        cpd = cpd.reshape(t_len, hc, wc)
         ti, ii, jj = np.nonzero(runs)
         if ti.size:
             ys = np.clip(np.round(my[ii, jj]).astype(int), 0, h - 1)
             xs = np.clip(np.round(mx[ii, jj]).astype(int), 0, w - 1)
             mask[ti, ys, xs] = True
-    return mask
+            np.maximum.at(cpd_max, (ti, ys, xs), cpd[ti, ii, jj].astype(np.float32))
+    return mask & (cpd_max >= PATTERN_CPD[0]) & (cpd_max <= PATTERN_CPD[1])
+
+
+def stripe_normal_angle(lum2d: np.ndarray, mask: np.ndarray) -> float:
+    """줄무늬 영역의 '줄에 수직인 방향'(밝기가 바뀌는 방향)을 0~180° 사이, 15° 단위로 돌려준다.
+
+    구조 텐서 J = Σ[gx², gx·gy; gx·gy, gy²] 의 주축 = 기울기 방향 = 줄의 법선.
+    각도는 _scan_maps 와 같은 좌표(x 오른쪽, y 아래쪽)를 쓴다.
+    """
+    gy, gx = np.gradient(lum2d.astype(np.float64))
+    m = mask if mask.any() else np.ones_like(mask, dtype=bool)
+    jxx, jyy, jxy = (gx[m] ** 2).sum(), (gy[m] ** 2).sum(), (gx[m] * gy[m]).sum()
+    ang = 0.5 * np.degrees(np.arctan2(2.0 * jxy, jxx - jyy))
+    step = PATTERN_ANGLES[1] - PATTERN_ANGLES[0]
+    return float((round(ang / step) * step) % 180)
+
+
+def motion_energy(lum_win: np.ndarray, mask: np.ndarray, angle_deg: float) -> tuple[float, float]:
+    """⑥ ±0.5초 창(T×H×W)에서 줄무늬 영역의 움직임을 잰다 → (시간 변화 에너지 비율, 방향 지수 DI).
+
+    줄의 법선 방향(angle_deg)으로 영역을 가로지르는 직선 최대 MOTION_ROWS 개를 골라,
+    직선마다 '위치 x × 시간 t' 휘도 단면을 만들고 평균을 뺀 뒤 Hann 창을 씌워 2차원 FFT 한다.
+      시간 변화 에너지 비율 = Σ|F(ω≠0, k)|² / Σ|F|²
+      DI = (E(ω·k > 0) − E(ω·k < 0)) / (E(ω·k > 0) + E(ω·k < 0))       (ω ≠ 0, k ≠ 0)
+    한 방향 흐름은 L(x − vt) 꼴이라 에너지가 한쪽(ω·k 부호 하나)에 몰려 |DI| ≈ 1,
+    진동·명암 반전·점멸은 정지파라 양쪽에 대칭으로 나뉘어 DI ≈ 0 (Adelson & Bergen 1985 운동 에너지).
+    """
+    t_len, h, w = lum_win.shape
+    mx, my, valid = _scan_maps(h, w, angle_deg)
+    ys = np.clip(np.round(my).astype(int), 0, h - 1)
+    xs = np.clip(np.round(mx).astype(int), 0, w - 1)
+    inreg = valid & mask[ys, xs]
+    rows = np.flatnonzero(inreg.sum(axis=1) >= 8)
+    if rows.size == 0 or t_len < 3:
+        return 0.0, 0.0
+    rows = rows[np.linspace(0, rows.size - 1, min(MOTION_ROWS, rows.size)).astype(int)]
+    e_all = e_time = e_pos = e_neg = 0.0
+    for r in rows:
+        cols = np.flatnonzero(inreg[r])
+        # 가장 긴 연속 구간만 쓴다 (영역이 끊긴 곳을 이어 붙이면 가짜 주파수가 생김)
+        breaks = np.flatnonzero(np.diff(cols) > 1)
+        seg = np.split(cols, breaks + 1)
+        cols = max(seg, key=len)
+        if cols.size < 8:
+            continue
+        a = _sample(lum_win, mx[r:r + 1, cols], my[r:r + 1, cols], valid[r:r + 1, cols])[:, 0, :]
+        a = np.nan_to_num(a.astype(np.float64))
+        a = a - a.mean()
+        # 정지 성분 = 위치마다의 시간 평균. 나머지 = 시간에 따라 변한 성분 (창 없이 재야 정지 패턴이 0이 됨)
+        resid = a - a.mean(axis=0, keepdims=True)
+        e_all += (a ** 2).sum()
+        e_time += (resid ** 2).sum()
+        # 방향은 변한 성분에만 창을 씌워 FFT (정지 성분이 창 때문에 시간 주파수로 새는 것을 막음)
+        b = resid * np.hanning(t_len)[:, None] * np.hanning(a.shape[1])[None, :]
+        p = np.abs(np.fft.fft2(b)) ** 2
+        prod = np.fft.fftfreq(t_len)[:, None] * np.fft.fftfreq(a.shape[1])[None, :]
+        e_pos += p[prod > 0].sum()
+        e_neg += p[prod < 0].sum()
+    if e_all <= 0:
+        return 0.0, 0.0
+    di = (e_pos - e_neg) / (e_pos + e_neg) if (e_pos + e_neg) > 0 else 0.0
+    return float(e_time / e_all), float(di)
+
+
+def classify_motion(time_ratio: float, di: float) -> str:
+    """⑥ 시간 에너지 비율과 방향 지수 → 'static' | 'drifting' | 'reversing'."""
+    if time_ratio < MOTION_STATIC_MAX:
+        return "static"
+    if abs(di) >= MOTION_DRIFT_MIN_DI:
+        return "drifting"
+    return "reversing"
 
 
 def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
@@ -411,7 +515,10 @@ def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None =
 
     돌려주는 값
     - stripe_area     프레임별 줄무늬 픽셀 면적 비율
-    - dynamic         프레임별 '움직이는 줄무늬' 여부 (⑥)
+    - motion          프레임별 움직임 분류 'static' | 'reversing' | 'drifting' (줄무늬 없으면 '') (⑥)
+    - time_ratio      프레임별 시간 변화 에너지 비율 (정지 판정 근거)
+    - direction_index 프레임별 방향 지수 DI (흐름 판정 근거)
+    - dynamic         (호환용) motion == 'reversing'
     - candidate       프레임별 면적 조건 충족 여부 (⑦)
     - max_stripe_sec  아무 1초 창 안의 후보 프레임 시간(초) 최댓값
     - peak_stripe_area 가장 넓은 줄무늬 면적
@@ -428,20 +535,30 @@ def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None =
     stripes = stripe_masks(lum)
     area = stripes.mean(axis=(1, 2))
 
-    # ⑥ 움직임: ±0.5초(반 창) 안에 전이한 적 있는 픽셀
+    # ⑥ 움직임 3분류: ±0.5초(반 창) 휘도 단면의 운동 에너지
     half = w // 2
-    moved = (signed != 0)
-    csum = np.concatenate([np.zeros((1,) + moved.shape[1:], np.int32), np.cumsum(moved, axis=0, dtype=np.int32)])
-    dynamic = np.zeros(t_len, dtype=bool)
-    for t in range(t_len):
-        if not stripes[t].any():
+    motion = np.full(t_len, "", dtype=object)
+    time_ratio = np.zeros(t_len)
+    direction_index = np.zeros(t_len)
+    stride = max(1, w // 4)                                  # 계산량: 창 중심을 1/4초마다 옮겨 이웃 프레임에 같은 결과
+    for t0 in range(0, t_len, stride):
+        frames_here = [t for t in range(t0, min(t_len, t0 + stride)) if stripes[t].any()]
+        if not frames_here:
             continue
-        lo_t, hi_t = max(0, t - half), min(t_len, t + half + 1)
-        changed = (csum[hi_t] - csum[lo_t]) > 0
-        dynamic[t] = changed[stripes[t]].mean() >= PATTERN_DYNAMIC_FRAC
+        tc = frames_here[len(frames_here) // 2]
+        lo_t, hi_t = max(0, tc - half), min(t_len, tc + half + 1)
+        region = stripes[lo_t:hi_t].any(axis=0)
+        ang = stripe_normal_angle(lum[tc], stripes[tc])
+        ratio, di = motion_energy(lum[lo_t:hi_t], region, ang)
+        cls = classify_motion(ratio, di)
+        for t in frames_here:
+            motion[t], time_ratio[t], direction_index[t] = cls, ratio, di
+    dynamic = motion == "reversing"
 
-    # ⑦ 면적
-    limit = np.where(dynamic, PATTERN_AREA_DYNAMIC, PATTERN_AREA_STATIC)
+    # ⑦ 면적: 정지 > 40%, 반전 > 25%, 흐름은 제외(원문) 또는 25%
+    drift_limit = np.inf if PATTERN_DRIFT_EXEMPT else PATTERN_AREA_DYNAMIC
+    limit = np.where(motion == "static", PATTERN_AREA_STATIC,
+                     np.where(motion == "drifting", drift_limit, PATTERN_AREA_DYNAMIC))
     cand = area > limit
 
     # ⑧ 지속: 1초 창 [s, s+W) 안의 후보 프레임 수 ≥ ceil(0.5·W)
@@ -456,6 +573,9 @@ def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None =
     hazard_mask = stripes[hazard_frames].any(axis=0) if hazard_frames.any() else np.zeros(lum.shape[1:], bool)
     return {
         "stripe_area": area,
+        "motion": motion,
+        "time_ratio": time_ratio,
+        "direction_index": direction_index,
         "dynamic": dynamic,
         "candidate": cand,
         "max_stripe_sec": float(counts.max()) / fps if t_len else 0.0,
