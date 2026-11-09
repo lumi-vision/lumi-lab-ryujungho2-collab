@@ -136,7 +136,7 @@ def main() -> None:
         manifest.append({"name": name, "file": path.name, "설명": desc, "설계상 기대": expect,
                          "mask_area": float(mask.mean()) if mask is not None else 0.0})
         print(name, desc)
-    meta = {"width": W, "height": H, "fps": FPS, "frames": N, "source": "BBB 1080p 80초~, 960×540", "ppd": ppd,
+    meta = {"width": W, "height": H, "fps": FPS, "frames": N, "source": "BBB 1080p 80초~", "ppd": ppd,
             "videos": manifest}
     (OUT / "manifest.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
