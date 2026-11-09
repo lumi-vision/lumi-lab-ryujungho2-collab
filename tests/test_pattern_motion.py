@@ -107,3 +107,13 @@ def test_cpd_band_1_to_8():
     # 2026-11-10 측정: 방향별로 상한을 자르던 이전 구현은 56% (비스듬한 스캔이 10 cpd 를 2.6 cpd 로 잼),
     # 최댓값 방식은 2.75% — 줄무늬 영역 가장자리에서 비스듬한 스캔만 닿는 픽셀이 남음(알려진 한계)
     assert outside["peak_stripe_area"] < 0.05 and outside["dangerous"] is False
+
+
+@pytest.mark.parametrize("area", [0.30, 0.55])
+@pytest.mark.parametrize("period", [6, 8])
+def test_area_accuracy_within_1_point(area, period):
+    """면적 측정 오차 고정 (2026-11-10): 이전 구현은 +4.4%p 과대 측정.
+    지금은 비스듬한 스캔이 경계 밖으로 몇 픽셀 넘쳐 +0.6%p 안팎(보수적 방향)."""
+    r = measure.analyze_pattern(stripes(motion="static", area=area, period=period, n=3), FPS)
+    intended = round(W * area) / W
+    assert intended <= r["peak_stripe_area"] <= intended + 0.01, (area, period, r["peak_stripe_area"])

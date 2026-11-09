@@ -258,6 +258,9 @@ PATTERN_CPD = (1.0, 8.0)          # 위험 공간 주파수 (cycles per degree),
 MOTION_STATIC_MAX = 0.10          # 시간 변화 에너지 비율이 이 값 미만이면 정지 — 구현 선택
 MOTION_DRIFT_MIN_DI = 0.5         # 방향 지수 |DI| 가 이 값 이상이면 흐름 — 구현 선택
 MOTION_ROWS = 64                  # 움직임 판정에 쓰는 스캔 직선 수 (계산량 제한)
+STRIPE_EXTREMUM_TOL = 0.25        # 줄 극값을 옮길 최소 차이 (cd/m²) — 구현 선택. 비스듬한 스캔의 보간이 만드는
+                                  # 소수점 차이를 따라 극값이 평평한 배경 안으로 밀려가는 것을 막음(2026-11-10).
+                                  # 8비트 한 단계(배경 38 cd/m² 근처 약 0.8)보다 작게 둠
 PATTERN_DYNAMIC_FRAC = MOTION_STATIC_MAX   # (호환용 옛 이름)
 PATTERN_MIN_SEC = 0.5             # 1초 창 안의 줄무늬 후보 프레임이 이 시간 이상이면 위험
 PATTERN_ANGLES = tuple(range(0, 180, 15))   # 스캔 방향 (도)
@@ -325,7 +328,7 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
     return_cpd=True 이면 (bool, 구간의 평균 cpd N×M float) 을 돌려준다(줄무늬 아닌 곳은 0).
 
     극값 찾기 (히스테리시스 20 cd/m², 시간축 픽셀 전이 ②와 같은 방식):
-      현재 극값에서 같은 방향으로 더 가면 극값을 옮기고(평평한 줄은 처음 닿은 곳),
+      현재 극값에서 같은 방향으로 STRIPE_EXTREMUM_TOL 넘게 더 가면 극값을 옮기고(평평한 줄은 처음 닿은 곳),
       반대 방향으로 20 이상 물러나면 현재 극값을 '확정'하고 방향을 바꾼다.
     극값이 확정될 때마다 직전 극값과의 사이 = 줄 하나(반 주기 h 표본)를 검사한다:
       유효 ⇔ min(두 극값) < 160 이고 ppd / (2h) ≥ 1 (cpd 하한만).
@@ -333,7 +336,13 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
     실제보다 낮은 cpd 로 재진다. 그래서 stripe_masks 가 모든 방향의 cpd 중 최댓값(= 줄에 수직인 방향의 값)으로
     상한을 판정한다 (2026-11-10: 이전 구현은 방향마다 상한을 잘라서, 10 cpd 줄무늬도 비스듬한 방향에서 통과했음).
     유효한 줄이 k 개 이어지면 극값은 k+1 개, 쌍 수 = (k+1)//2. 5쌍 ⇔ k ≥ 9.
-    줄무늬 구간 = 그 연속 구간의 첫 극값부터 마지막 극값 + 마지막 줄 폭까지.
+    줄무늬 구간 = 그 연속 구간의 첫 극값부터 마지막으로 확정된 극값까지 [첫 극값, 마지막 극값).
+    (2026-11-10: 이전에는 '마지막 극값 + 마지막 줄 폭'까지 표시했다. 마지막 극값은 줄무늬가 끝나고 배경이
+     시작되는 곳이라 배경을 줄 폭만큼 더 칠했고, 비스듬한 스캔에서는 1/cos θ 배로 더 넘쳐 면적이 약 +4.5%p 과대 측정됐다.
+     남은 오차(2026-11-10 측정, 160×90 세로 줄무늬): 의도 면적보다 +0.6%p 안팎 크게 잰다(비스듬한 스캔이 영역
+     경계 밖으로 몇 픽셀 넘침). '첫 극값과 다음 극값 사이를 줄로 세지 않는' 규칙을 시험했더니 경계는 1픽셀 이내로
+     맞았지만 화면 가장자리에서 줄을 빠뜨려 −1.6%p 과소 측정(위험을 놓치는 방향)이 생겨 채택하지 않았다.
+     화면 끝 줄은 '마지막 극값까지'라 반 주기만큼 덜 칠할 수 있다(100% 화면에서 99.6~99.9%).)
     """
     n, m = profiles.shape
     need = 2 * PATTERN_MIN_PAIRS - 1
@@ -364,7 +373,7 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
             hit = has_prev[ok & (k[has_prev] >= need)]
             if hit.size:
                 seg_cpd = ppd / (2.0 * run_hsum[hit] / k[hit])
-                segs.append((hit, run_start[hit].copy(), cur_i[hit] + (cur_i[hit] - prev_i[hit]), seg_cpd))
+                segs.append((hit, run_start[hit].copy(), cur_i[hit].copy(), seg_cpd))
         prev[rows], prev_i[rows] = cur[rows], cur_i[rows]
 
     for j in range(m + 1):
@@ -383,8 +392,8 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
         if z.size:
             fresh = z[np.isnan(lo[z])]
             lo[fresh], hi[fresh], lo_i[fresh], hi_i[fresh] = v[fresh], v[fresh], j, j
-            dn = z[v[z] < lo[z]]; lo[dn], lo_i[dn] = v[dn], j
-            up = z[v[z] > hi[z]]; hi[up], hi_i[up] = v[up], j
+            dn = z[v[z] < lo[z] - STRIPE_EXTREMUM_TOL]; lo[dn], lo_i[dn] = v[dn], j
+            up = z[v[z] > hi[z] + STRIPE_EXTREMUM_TOL]; hi[up], hi_i[up] = v[up], j
             go = z[(hi[z] - lo[z]) >= DELTA_CD]
             if go.size:
                 rising = lo_i[go] < hi_i[go]
@@ -397,7 +406,7 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
         a = np.flatnonzero(~nan & (direction != 0))
         if a.size:
             d = direction[a]
-            ext = a[((d == 1) & (v[a] > cur[a])) | ((d == -1) & (v[a] < cur[a]))]
+            ext = a[((d == 1) & (v[a] > cur[a] + STRIPE_EXTREMUM_TOL)) | ((d == -1) & (v[a] < cur[a] - STRIPE_EXTREMUM_TOL))]
             cur[ext], cur_i[ext] = v[ext], j
             rev = a[((d == 1) & (cur[a] - v[a] >= DELTA_CD)) | ((d == -1) & (v[a] - cur[a] >= DELTA_CD))]
             if rev.size:
