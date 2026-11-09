@@ -5,6 +5,7 @@ LUMI 프로젝트 개인 실험 저장소입니다. 2026-11-08에 처음부터 �
 - 데이터 출처: [DATA_SOURCES.md](DATA_SOURCES.md)
 - 초기화 전 작업 전체: 브랜치 [`archive/2026-11-08-before-reset`](https://github.com/lumi-vision/lumi-lab-ryujungho2-collab/tree/archive/2026-11-08-before-reset) (태그 `before-reset-2026-11-08`)
 
+- **현황 보고 (먼저 읽기)**: [docs/STATUS_2026-11-10.md](docs/STATUS_2026-11-10.md) — 된 것·이슈·안 된 것·해야 할 것·근거
 - **작업 설계 (지금 진행 중)**: [PLAN.md](PLAN.md). 휘도·적색·줄무늬 위험 영상을 의도대로 합성할 수 있는지, 우리 판정기와 팀원 판별기로 전·후 검사합니다.
 - 판정 기준: [docs/CRITERIA.md](docs/CRITERIA.md) · 계산법: [docs/BASICS.md](docs/BASICS.md)
 - **판정 기준 근거 보고서 (수식·출처 등급)**: [docs/STANDARDS.md](docs/STANDARDS.md)
