@@ -256,6 +256,8 @@ def pixels_per_degree(width: int, height: int, angle_deg: float = 0.0) -> float:
     1 / sqrt((cosθ/ppd_가로)² + (sinθ/ppd_세로)²).
     해상도가 낮으면 같은 화면에서 1도당 픽셀이 적다: 128×72 → 약 3.9 px/도 → 표현 가능한 최고 주파수는
     2픽셀 주기 = 약 1.9 cpd. 즉 저해상도 트랙은 1~1.9 cpd 줄무늬만 만들고 잴 수 있다.
+    전제: 프레임 = 16:9 화면 전체. 16:9 가 아닌 영상은 data.letterbox 로 여백을 넣어 16:9 캔버스로 만든 뒤 판정한다
+    (비율을 무시하고 늘리면 가로·세로 1도당 픽셀이 달라져 cpd 가 틀린다 — 팀원 판정기도 같은 전제, 2026-11-09 점검).
     """
     diag = DISPLAY_INCH * 2.54
     k = np.hypot(16.0, 9.0)

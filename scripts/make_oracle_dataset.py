@@ -34,7 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from lumi_synth import measure, oracle
-from lumi_synth.data import ClipSpec, file_sha256, save_sample, scan_clean_clips
+from lumi_synth.data import ClipSpec, content_box, file_sha256, save_sample, scan_clean_clips
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = {   # 경로는 --raw(기본 data/) 기준
@@ -87,10 +87,14 @@ def main() -> int:
         cap = cv2.VideoCapture(str(src))
         sw, sh = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         cap.release()
-        if sw < spec.width or sh < spec.height:
-            print(f"[오류] {split} 원본 {src.name} 이 {sw}×{sh} 로 목표 {spec.width}×{spec.height} 보다 작습니다(확대 금지). "
-                  f"--{split} 로 더 큰 영상을 지정하세요.", file=sys.stderr)
+        try:
+            box = content_box(sw, sh, spec)                 # 비율 유지 + 여백. 확대가 필요하면 ValueError
+        except ValueError as e:
+            print(f"[오류] {split} 원본 {src.name}: {e}. --{split} 로 더 큰 영상을 지정하세요.", file=sys.stderr)
             return 2
+        if box[2:] != (spec.width, spec.height):
+            print(f"[알림] {split} 원본 {sw}×{sh} 는 16:9 가 아니라 여백이 들어갑니다(영상 영역 {box[2]}×{box[3]}). "
+                  "오라클 마스크가 여백에도 놓일 수 있습니다.")
     t0 = time.time()
     for split, (fname, s0, s1) in SOURCES.items():
         src = args.raw / fname

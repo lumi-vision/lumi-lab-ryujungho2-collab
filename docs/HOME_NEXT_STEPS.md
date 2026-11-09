@@ -26,7 +26,7 @@ python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_
 pytest
 ```
 
-**합격**: 37 passed (노트북 결과와 같음, 2026-11-09 해상도 통일 커밋 기준). 하나라도 실패하면 멈추고 실패 내용을 기록.
+**합격**: 40 passed (노트북 결과와 같음, 2026-11-09 해상도 통일 커밋 기준). 하나라도 실패하면 멈추고 실패 내용을 기록.
 
 ## 2. 판정 규칙 외부 검증 결과 확인
 

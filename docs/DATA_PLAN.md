@@ -94,6 +94,7 @@ Sintel·Tears of Steel 은 실사 합성(ToS)과 어두운 장면(Sintel)이 있
 | train·val 원본 | BBB 640×360 (`data/raw`) | BBB 1080p (`data/sources/big_buck_bunny_1080p/`, step0 이 받음) |
 | test 원본 | Elephants Dream 480×270 | **미정** — 480×270 은 768×432 보다 작아 쓸 수 없음. 다른 영화의 768×432 이상 영상 필요(후보: Sintel 1080p, Elephants Dream HD) |
 | 확대 | 조용히 확대됨(INTER_AREA) | **금지**: 원본이 목표보다 작으면 `read_clip`·`make_oracle_dataset.py` 가 멈춤 |
+| 화면 비율 | 비율 무시하고 늘림 | **비율 유지 + 검은 여백**(`data.letterbox`): 면적이 화면 기준, cpd 가 가로·세로 같게 (CHANGELOG §17) |
 | GAN 학습 배율 | `--scale` 자유 | 1.0 만. 다른 값은 `--debug-scale`(동작 확인용, 결과는 학습에 못 씀) |
 | 학습 장소 | 노트북 CPU 가능(64×36) | 집 PC(RTX 5080). 노트북은 코드·테스트·짧은 동작 확인 |
 

@@ -239,3 +239,67 @@ def test_24_to_30_duplication_adds_no_flicker_and_keeps_rate():
     before = measure.analyze(src, 24.0)["max_flashes"]
     after = measure.analyze(src[idx], 30.0)["max_flashes"]
     assert before == after == 5.0
+
+
+# ---------------------------------------------------------------- 화면 비율(여백 처리, 2026-11-09)
+def test_content_box_aspect_ratios():
+    # 16:9 화면(128×72)에 넣을 때 영상 영역: 비율 유지, 가운데, 남는 쪽은 여백.
+    from lumi_synth.data import ClipSpec, content_box
+    spec = ClipSpec(128, 72)
+    assert content_box(1280, 720, spec) == (0, 0, 128, 72)        # 16:9 → 여백 없음
+    assert content_box(640, 359, spec) == (0, 0, 128, 72)         # BBB 640×359: 1픽셀 이하 차이는 꽉 채움
+    assert content_box(640, 480, spec) == (16, 0, 96, 72)         # 4:3 → 좌우 여백 16
+    x0, y0, w, h = content_box(720, 1280, spec)                   # 9:16 세로 → 좌우 큰 여백
+    assert (y0, h) == (0, 72) and w == round(720 * 72 / 1280) and x0 == (128 - w) // 2
+    assert content_box(2560, 1080, spec)[1] > 0                   # 21:9 → 위아래 여백
+    with pytest.raises(ValueError, match="확대 금지"):
+        content_box(64, 36, spec)
+
+
+def test_letterbox_keeps_content_and_black_bars():
+    from lumi_synth.data import ClipSpec, content_box, letterbox
+    spec = ClipSpec(128, 72)
+    frame = np.full((480, 640, 3), 150, np.uint8)                 # 4:3 회색
+    out = letterbox(frame, spec)
+    x0, y0, w, h = content_box(640, 480, spec)
+    assert out.shape == (72, 128, 3)
+    assert (out[:, :x0] == 0).all() and (out[:, x0 + w:] == 0).all()   # 여백은 검정
+    assert (out[y0:y0 + h, x0:x0 + w] == 150).all()                # 영상 영역은 그대로(축소만)
+    same = np.random.default_rng(0).integers(0, 256, (72, 128, 3), dtype=np.uint8)
+    assert letterbox(same, spec) is same                            # 크기·비율이 같으면 손대지 않음
+
+
+def test_portrait_flash_area_is_measured_against_screen(tmp_path):
+    # ITU 면적 = '화면에 표시된 면적' 대비. 세로 영상의 70% 가 깜빡여도 16:9 화면 기준으로는 약 22% → 안전.
+    # 여백 없이 늘리면 영상 프레임 기준 70% → 위험으로 잘못 판정된다.
+    import cv2
+    from lumi_synth import measure
+    from lumi_synth.data import ClipSpec, read_clip
+    sw, sh = 144, 256                                              # 9:16 세로
+    path = tmp_path / "portrait.avi"
+    vw = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), 24.0, (sw, sh))
+    for t in range(24):
+        f = np.full((sh, sw, 3), 60, np.uint8)
+        if int(2 * 5 * t / 24) % 2 == 0:                           # 5 Hz
+            f[: int(sh * 0.7)] = 200
+        vw.write(f)
+    vw.release()
+    spec = ClipSpec(128, 72, 24, 24.0)
+    boxed = read_clip(path, 0, spec)
+    r = measure.analyze(boxed, 24.0)
+    assert r["peak_area"] < measure.AREA_LIMIT and not r["dangerous"]
+    assert abs(r["peak_area"] - 0.7 * (40 * 72) / (128 * 72)) < 0.03    # 영상 영역 40×72 의 70%
+    stretched = np.stack([cv2.resize(f, (128, 72), interpolation=cv2.INTER_AREA) for f in _read_all(path)])
+    assert measure.analyze(stretched, 24.0)["dangerous"]           # 비율 무시(이전 방식) → 위험으로 잘못 판정
+
+
+def _read_all(path):
+    import cv2
+    cap, out = cv2.VideoCapture(str(path)), []
+    while True:
+        ok, f = cap.read()
+        if not ok:
+            break
+        out.append(f)
+    cap.release()
+    return out
