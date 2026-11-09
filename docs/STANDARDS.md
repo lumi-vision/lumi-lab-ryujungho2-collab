@@ -14,7 +14,7 @@
 | 위험 종류 | 근거 표준 | 우리 판정기 | 검증 | 우리 합성 |
 |---|---|---|---|---|
 | 휘도 깜빡임 | ITU-R BT.1702-3 Guideline 1 | ✅ 구현 | ✅ pse-test-media 210개 중 201개 일치, 위험 놓침 0 (A7 과대평가 주의) | ✅ 오라클 모양 4종 |
-| 적색 깜빡임 | WCAG 2.2 / ISO 9241-391 (수식), ITU는 정의 없음 | ✅ 구현 (2026-11-10, `analyze_red`) | ✅ pse 적색 패턴 208/208 (`checks/red/README.md`) | ✅ 시연 영상 (`checks/demo_hazards`) |
+| 적색 깜빡임 | WCAG 2.2 / ISO 9241-391 (수식), ITU는 정의 없음 | ✅ 구현 (2026-11-10, `analyze_red`) | ✅ pse 적색 패턴 208/208 (`checks/red/README.md`), 1080p 세트 96개 중 화면 25% 세트 48/48 (세트 목록 CSV 기준, JSON 모순 16개 — `checks/red/sets.md`) | ✅ 시연 영상 (`checks/demo_hazards`) |
 | 줄무늬 패턴 | ITU-R BT.1702-3 Guideline 2 / Ofcom | △ 구현됨, 검증 전 | ❌ | ❌ 없음 |
 
 ---
