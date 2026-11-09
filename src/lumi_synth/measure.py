@@ -151,7 +151,18 @@ def max_flashes_per_second(events: np.ndarray, n_frames: int, fps: float) -> flo
     return float(window_counts(e, fps).max()) / 2.0 if n_frames else 0.0
 
 
-def analyze(frames_bgr: np.ndarray, fps: float) -> dict:
+def _check_input(frames_bgr: np.ndarray, fps: float) -> None:
+    """analyze·analyze_pattern 공통 입력 검사."""
+    if frames_bgr.ndim != 4 or frames_bgr.shape[-1] != 3 or frames_bgr.dtype != np.uint8:
+        raise ValueError(f"입력은 (T,H,W,3) uint8 BGR이어야 합니다: shape={frames_bgr.shape}, dtype={frames_bgr.dtype}")
+    if len(frames_bgr) < 2:
+        raise ValueError("프레임이 2장 이상이어야 전이를 셀 수 있습니다.")
+    if not (np.isfinite(fps) and fps > 0):
+        raise ValueError(f"fps는 양수여야 합니다: {fps}")
+
+
+def analyze(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
+            signed: np.ndarray | None = None) -> dict:
     """영상(T×H×W×3 uint8 BGR)을 규칙대로 판정한다. 오라클·GAN·데이터셋 라벨이 모두 이 함수를 쓴다.
 
     돌려주는 값
@@ -165,16 +176,13 @@ def analyze(frames_bgr: np.ndarray, fps: float) -> dict:
     - dangerous    위험 여부 (max_flashes > 3)
     - hazard_frames 위험한 1초 창에 속한 프레임 (bool, T) — '언제' 정답
     - hazard_mask  위험한 창 안에서 화면 전이를 만든 픽셀 (bool, H×W) — '어디' 정답
+    lum, signed 는 이미 계산한 ①·② 결과를 재사용할 때만 넘긴다(analyze_all).
     """
-    if frames_bgr.ndim != 4 or frames_bgr.shape[-1] != 3 or frames_bgr.dtype != np.uint8:
-        raise ValueError(f"입력은 (T,H,W,3) uint8 BGR이어야 합니다: shape={frames_bgr.shape}, dtype={frames_bgr.dtype}")
-    if len(frames_bgr) < 2:
-        raise ValueError("프레임이 2장 이상이어야 전이를 셀 수 있습니다.")
-    if not (np.isfinite(fps) and fps > 0):
-        raise ValueError(f"fps는 양수여야 합니다: {fps}")
-
-    lum = luminance_cd(frames_bgr)
-    signed = pixel_transitions(lum)
+    _check_input(frames_bgr, fps)
+    if lum is None:
+        lum = luminance_cd(frames_bgr)
+    if signed is None:
+        signed = pixel_transitions(lum)
     c = concurrency_frames(fps)
     a_up, a_dn = directional_areas(signed, c)
     e = screen_transitions(a_up, a_dn, signed)
@@ -205,6 +213,272 @@ def analyze(frames_bgr: np.ndarray, fps: float) -> dict:
         "dangerous": flashes > MAX_FLASHES_PER_SEC,
         "hazard_frames": hazard_frames,
         "hazard_mask": hazard_mask,
+    }
+
+
+# =============================================================================================
+# 줄무늬(규칙 패턴) 판정 — ITU-R BT.1702-3 Annex 1 Guideline 2 + Attachment 1, 일부는 팀원 판정기 기준
+# 수식 정의와 근거: docs/RULES_SPEC.md §8. 깜빡임 판정(analyze)과 독립이며, analyze_all() 이 둘을 합친다.
+#
+#   ⑤ 줄무늬 쌍     화면을 12방향(0°~165°, 15° 간격)으로 1픽셀 간격 직선을 그어 휘도 프로파일을 얻고,
+#                  20 cd/m² 히스테리시스로 '밝은 줄·어두운 줄' 극값을 찾는다. 이웃 극값 사이(줄 하나)가
+#                  (어두운 쪽 < 160) 이고 (공간 주파수 1~10 cpd) 이면 '유효한 줄'. 유효한 줄이 끊김 없이
+#                  10개(밝은 5 + 어두운 5 = 5쌍) 이상 이어진 구간의 픽셀을 그 프레임의 '줄무늬 픽셀'로 표시.
+#   ⑥ 움직임        줄무늬 픽셀 중 ±0.5초 안에 픽셀 전이(②)가 있었던 비율 ≥ 10% 면 '움직이는 줄무늬'.
+#   ⑦ 면적          줄무늬 픽셀 면적 > 25%(움직임) 또는 > 40%(멈춤) 이면 그 프레임은 '줄무늬 후보'.
+#   ⑧ 위험          아무 1초 창 안의 후보 프레임이 0.5초 이상(≥ ceil(W/2) 프레임)이면 위험.
+#
+# 출처 구분 (논문에 그대로 쓸 것)
+#   ITU 원문:   면적 25%(움직임)/40%(멈춤), 명암은 깜빡임과 같은 기준(ΔL ≥ 20, 어두운 쪽 < 160), 모든 방향
+#   팀원 판정기(lumi-lab-rockrovks vdcoreops_v2.py, 2026-11-09) 기준을 따름 — 사용자 결정 2026-11-09:
+#               5쌍 이상(ITU 원문은 'more than five' = 6쌍 이상, 우리가 1쌍 보수적), 1~10 cpd,
+#               시청 조건(노트북 56 cm, 15인치 16:9), 12방향 15° 간격, 지속 0.5초
+#   LUMI 결정:  극값 히스테리시스 20 cd/m²(팀원 5), 쌍 수 = (극값 수)//2, 줄무늬 픽셀과 면적을 같은 구간에서 잼
+#               (팀원은 고대비 밀도로 면적을 따로 잼), 화면 전체를 1픽셀 간격으로 스캔(팀원은 중앙 60개 직선),
+#               움직임 판정 10%
+#   미구현:     '한 방향으로 매끄럽게 흘러가는 패턴은 제외'(ITU) — 흐름도 움직임으로 봐서 25% 를 적용(보수적)
+# =============================================================================================
+PATTERN_MIN_PAIRS = 5             # 밝은·어두운 줄 쌍이 이 수 '이상'(≥)이면 줄무늬 (ITU 는 > 5)
+PATTERN_AREA_DYNAMIC = 0.25       # 움직이는 줄무늬 면적 한계, 경계 제외(>)
+PATTERN_AREA_STATIC = 0.40        # 멈춘 줄무늬 면적 한계, 경계 제외(>)
+PATTERN_CPD = (1.0, 10.0)         # 위험 공간 주파수 (cycles per degree), 경계 포함
+PATTERN_DYNAMIC_FRAC = 0.10       # 줄무늬 픽셀 중 ±0.5초 안에 전이한 비율이 이 값 이상이면 '움직임'
+PATTERN_MIN_SEC = 0.5             # 1초 창 안의 줄무늬 후보 프레임이 이 시간 이상이면 위험
+PATTERN_ANGLES = tuple(range(0, 180, 15))   # 스캔 방향 (도)
+VIEW_DISTANCE_CM = 56.0           # 노트북 표준 시청 거리 (팀원 판정기와 같음)
+DISPLAY_INCH = 15.0               # 화면 대각선 (16:9)
+
+
+def pixels_per_degree(width: int, height: int, angle_deg: float = 0.0) -> float:
+    """시청 조건(56 cm, 15인치 16:9)에서 방향 angle_deg 로 1도(시야각)에 들어가는 픽셀 수.
+
+    가로·세로 시야각 = 2·atan(화면 크기 / (2·거리)). 방향별 값은 팀원 판정기와 같은 식
+    1 / sqrt((cosθ/ppd_가로)² + (sinθ/ppd_세로)²).
+    해상도가 낮으면 같은 화면에서 1도당 픽셀이 적다: 128×72 → 약 3.9 px/도 → 표현 가능한 최고 주파수는
+    2픽셀 주기 = 약 1.9 cpd. 즉 저해상도 트랙은 1~1.9 cpd 줄무늬만 만들고 잴 수 있다.
+    """
+    diag = DISPLAY_INCH * 2.54
+    k = np.hypot(16.0, 9.0)
+    fov_w = 2.0 * np.degrees(np.arctan(diag * 16.0 / k / (2.0 * VIEW_DISTANCE_CM)))
+    fov_h = 2.0 * np.degrees(np.arctan(diag * 9.0 / k / (2.0 * VIEW_DISTANCE_CM)))
+    a = np.radians(angle_deg)
+    return float(1.0 / np.hypot(np.cos(a) / (width / fov_w), np.sin(a) / (height / fov_h)))
+
+
+def _scan_maps(h: int, w: int, angle_deg: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """방향 angle_deg 의 스캔 직선들을 '행'으로 늘어놓은 캔버스 → 원본 좌표 (map_x, map_y, valid).
+
+    캔버스 (i, j): 원본 좌표 = 화면 중심 + (j − 열 중심)·d + (i − 행 중심)·n,
+    d = (cosθ, sinθ) 는 스캔 방향(1칸 = 원본 1픽셀), n = (−sinθ, cosθ) 는 이웃 직선 방향(1픽셀 간격).
+    0°·90° 는 좌표가 정수라 보간 없이 원본 픽셀을 그대로 읽는다.
+    """
+    a = np.radians(angle_deg)
+    ca, sa = float(np.cos(a)), float(np.sin(a))
+    ca, sa = (0.0 if abs(ca) < 1e-12 else ca), (0.0 if abs(sa) < 1e-12 else sa)
+    wc = int(np.ceil(abs(w * ca) + abs(h * sa)))
+    hc = int(np.ceil(abs(w * sa) + abs(h * ca)))
+    jj, ii = np.meshgrid(np.arange(wc, dtype=np.float64) - (wc - 1) / 2.0,
+                         np.arange(hc, dtype=np.float64) - (hc - 1) / 2.0)
+    mx = (w - 1) / 2.0 + jj * ca - ii * sa
+    my = (h - 1) / 2.0 + jj * sa + ii * ca
+    for m in (mx, my):                                   # 부동소수 오차로 0°·90° 정수 좌표가 흔들리지 않게
+        r = np.round(m)
+        m[np.abs(m - r) < 1e-6] = r[np.abs(m - r) < 1e-6]
+    valid = (mx >= 0) & (mx <= w - 1) & (my >= 0) & (my <= h - 1)
+    return mx, my, valid
+
+
+def _sample(lum: np.ndarray, mx: np.ndarray, my: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """휘도(T×H×W)를 캔버스 좌표에서 쌍선형 보간으로 읽는다. 화면 밖은 NaN (직선이 끊긴 곳)."""
+    h, w = lum.shape[1:]
+    x0 = np.clip(np.floor(mx).astype(int), 0, w - 1)
+    y0 = np.clip(np.floor(my).astype(int), 0, h - 1)
+    x1, y1 = np.minimum(x0 + 1, w - 1), np.minimum(y0 + 1, h - 1)
+    fx, fy = (mx - x0).astype(np.float32), (my - y0).astype(np.float32)
+    out = (lum[:, y0, x0] * (1 - fx) * (1 - fy) + lum[:, y0, x1] * fx * (1 - fy)
+           + lum[:, y1, x0] * (1 - fx) * fy + lum[:, y1, x1] * fx * fy)
+    out[:, ~valid] = np.nan
+    return out
+
+
+def stripe_runs(profiles: np.ndarray, ppd: float) -> np.ndarray:
+    """⑤ 휘도 프로파일 여러 줄(N×M, NaN = 끊김) → 줄무늬로 판정된 표본 (N×M bool).
+
+    극값 찾기 (히스테리시스 20 cd/m², 시간축 픽셀 전이 ②와 같은 방식):
+      현재 극값에서 같은 방향으로 더 가면 극값을 옮기고(평평한 줄은 처음 닿은 곳),
+      반대 방향으로 20 이상 물러나면 현재 극값을 '확정'하고 방향을 바꾼다.
+    극값이 확정될 때마다 직전 극값과의 사이 = 줄 하나(반 주기 h 표본)를 검사한다:
+      유효 ⇔ min(두 극값) < 160 이고 1 ≤ ppd / (2h) ≤ 10 (cpd).
+    유효한 줄이 k 개 이어지면 극값은 k+1 개, 쌍 수 = (k+1)//2. 5쌍 ⇔ k ≥ 9.
+    줄무늬 구간 = 그 연속 구간의 첫 극값부터 마지막 극값 + 마지막 줄 폭까지.
+    """
+    n, m = profiles.shape
+    need = 2 * PATTERN_MIN_PAIRS - 1
+    out = np.zeros((n, m + 1), dtype=bool)
+    p = np.concatenate([profiles, np.full((n, 1), np.nan, profiles.dtype)], axis=1)  # 끝에서 마지막 극값 확정
+
+    direction = np.zeros(n, np.int8)       # 0: 아직 방향 모름, +1 올라가는 중(현재 극값 = 봉우리), -1 내려가는 중
+    lo = np.full(n, np.nan); lo_i = np.zeros(n, np.int64)   # 방향 모를 때의 최소·최대
+    hi = np.full(n, np.nan); hi_i = np.zeros(n, np.int64)
+    cur = np.full(n, np.nan); cur_i = np.zeros(n, np.int64)  # 추적 중인 극값
+    prev = np.full(n, np.nan); prev_i = np.full(n, -1, np.int64)  # 확정된 직전 극값
+    k = np.zeros(n, np.int64); run_start = np.zeros(n, np.int64)
+    segs = []                                               # (줄 번호, 시작, 끝) — 5쌍 이상 구간
+
+    def confirm(rows: np.ndarray) -> None:
+        """rows 의 '현재 극값'을 확정: 직전 극값과의 줄 하나를 검사하고 연속 구간을 갱신."""
+        has_prev = rows[prev_i[rows] >= 0]
+        if has_prev.size:
+            half = (cur_i[has_prev] - prev_i[has_prev]).astype(np.float64)
+            cpd = ppd / (2.0 * np.maximum(half, 1e-9))
+            ok = (np.minimum(cur[has_prev], prev[has_prev]) < DARK_LIMIT_CD) & \
+                 (cpd >= PATTERN_CPD[0]) & (cpd <= PATTERN_CPD[1])
+            start_new = ok & (k[has_prev] == 0)
+            run_start[has_prev[start_new]] = prev_i[has_prev[start_new]]
+            k[has_prev] = np.where(ok, k[has_prev] + 1, 0)
+            hit = has_prev[ok & (k[has_prev] >= need)]
+            if hit.size:
+                segs.append((hit, run_start[hit].copy(), cur_i[hit] + (cur_i[hit] - prev_i[hit])))
+        prev[rows], prev_i[rows] = cur[rows], cur_i[rows]
+
+    for j in range(m + 1):
+        v = p[:, j]
+        nan = np.isnan(v)
+        # 끊김: 추적 중인 극값을 확정하고 상태 초기화
+        brk = np.flatnonzero(nan & (direction != 0))
+        if brk.size:
+            confirm(brk)
+        reset = np.flatnonzero(nan)
+        direction[reset] = 0; k[reset] = 0; prev_i[reset] = -1
+        lo[reset] = np.nan; hi[reset] = np.nan
+
+        # 방향 모름: 최소·최대를 추적하다 차이가 20 이상이 되면 먼저 나온 쪽을 첫 극값으로 확정
+        z = np.flatnonzero(~nan & (direction == 0))
+        if z.size:
+            fresh = z[np.isnan(lo[z])]
+            lo[fresh], hi[fresh], lo_i[fresh], hi_i[fresh] = v[fresh], v[fresh], j, j
+            dn = z[v[z] < lo[z]]; lo[dn], lo_i[dn] = v[dn], j
+            up = z[v[z] > hi[z]]; hi[up], hi_i[up] = v[up], j
+            go = z[(hi[z] - lo[z]) >= DELTA_CD]
+            if go.size:
+                rising = lo_i[go] < hi_i[go]
+                cur[go] = np.where(rising, lo[go], hi[go]); cur_i[go] = np.where(rising, lo_i[go], hi_i[go])
+                confirm(go)                                   # 첫 극값 확정(직전 극값이 없으니 줄 검사는 없음)
+                cur[go] = np.where(rising, hi[go], lo[go]); cur_i[go] = np.where(rising, hi_i[go], lo_i[go])
+                direction[go] = np.where(rising, 1, -1)
+
+        # 방향 있음: 같은 방향이면 극값 이동, 반대로 20 이상이면 확정 후 방향 전환
+        a = np.flatnonzero(~nan & (direction != 0))
+        if a.size:
+            d = direction[a]
+            ext = a[((d == 1) & (v[a] > cur[a])) | ((d == -1) & (v[a] < cur[a]))]
+            cur[ext], cur_i[ext] = v[ext], j
+            rev = a[((d == 1) & (cur[a] - v[a] >= DELTA_CD)) | ((d == -1) & (v[a] - cur[a] >= DELTA_CD))]
+            if rev.size:
+                confirm(rev)
+                cur[rev], cur_i[rev] = v[rev], j
+                direction[rev] = -direction[rev]
+
+    for rows, s, e in segs:                                   # 구간 표시 (겹치면 합집합)
+        for r, a0, b0 in zip(rows.tolist(), s.tolist(), e.tolist()):
+            out[r, a0:min(b0, m)] = True
+    return out[:, :m]
+
+
+def stripe_masks(lum: np.ndarray) -> np.ndarray:
+    """⑤ 휘도(T×H×W) → 프레임별 줄무늬 픽셀 (T×H×W bool). 12방향의 합집합."""
+    t_len, h, w = lum.shape
+    mask = np.zeros(lum.shape, dtype=bool)
+    for ang in PATTERN_ANGLES:
+        mx, my, valid = _scan_maps(h, w, ang)
+        prof = _sample(lum, mx, my, valid)                   # T×Hc×Wc
+        hc, wc = prof.shape[1:]
+        runs = stripe_runs(prof.reshape(t_len * hc, wc), pixels_per_degree(w, h, ang)).reshape(t_len, hc, wc)
+        runs &= valid[None]
+        ti, ii, jj = np.nonzero(runs)
+        if ti.size:
+            ys = np.clip(np.round(my[ii, jj]).astype(int), 0, h - 1)
+            xs = np.clip(np.round(mx[ii, jj]).astype(int), 0, w - 1)
+            mask[ti, ys, xs] = True
+    return mask
+
+
+def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
+                    signed: np.ndarray | None = None) -> dict:
+    """줄무늬(규칙 패턴) 판정 ⑤~⑧. analyze() 와 같은 입력 검사, 같은 꼴의 정답(hazard_frames, hazard_mask).
+
+    돌려주는 값
+    - stripe_area     프레임별 줄무늬 픽셀 면적 비율
+    - dynamic         프레임별 '움직이는 줄무늬' 여부 (⑥)
+    - candidate       프레임별 면적 조건 충족 여부 (⑦)
+    - max_stripe_sec  아무 1초 창 안의 후보 프레임 시간(초) 최댓값
+    - peak_stripe_area 가장 넓은 줄무늬 면적
+    - dangerous       위험 여부 (⑧)
+    - hazard_frames, hazard_mask  위험 창 안의 후보 프레임 / 그 프레임들의 줄무늬 픽셀
+    """
+    _check_input(frames_bgr, fps)
+    if lum is None:
+        lum = luminance_cd(frames_bgr)
+    if signed is None:
+        signed = pixel_transitions(lum)
+    t_len = len(lum)
+    w = max(1, int(round(fps)))
+    stripes = stripe_masks(lum)
+    area = stripes.mean(axis=(1, 2))
+
+    # ⑥ 움직임: ±0.5초(반 창) 안에 전이한 적 있는 픽셀
+    half = w // 2
+    moved = (signed != 0)
+    csum = np.concatenate([np.zeros((1,) + moved.shape[1:], np.int32), np.cumsum(moved, axis=0, dtype=np.int32)])
+    dynamic = np.zeros(t_len, dtype=bool)
+    for t in range(t_len):
+        if not stripes[t].any():
+            continue
+        lo_t, hi_t = max(0, t - half), min(t_len, t + half + 1)
+        changed = (csum[hi_t] - csum[lo_t]) > 0
+        dynamic[t] = changed[stripes[t]].mean() >= PATTERN_DYNAMIC_FRAC
+
+    # ⑦ 면적
+    limit = np.where(dynamic, PATTERN_AREA_DYNAMIC, PATTERN_AREA_STATIC)
+    cand = area > limit
+
+    # ⑧ 지속: 1초 창 [s, s+W) 안의 후보 프레임 수 ≥ ceil(0.5·W)
+    need = int(np.ceil(PATTERN_MIN_SEC * w))
+    cs = np.concatenate([[0], np.cumsum(cand)])
+    starts = np.arange(t_len)
+    counts = cs[np.minimum(starts + w, t_len)] - cs[:t_len]
+    hazard_frames = np.zeros(t_len, dtype=bool)
+    for s in np.flatnonzero(counts >= need):
+        hazard_frames[s:s + w] = True
+    hazard_frames &= cand                                   # 위험 창 안의 '후보' 프레임만
+    hazard_mask = stripes[hazard_frames].any(axis=0) if hazard_frames.any() else np.zeros(lum.shape[1:], bool)
+    return {
+        "stripe_area": area,
+        "dynamic": dynamic,
+        "candidate": cand,
+        "max_stripe_sec": float(counts.max()) / fps if t_len else 0.0,
+        "peak_stripe_area": float(area.max()) if t_len else 0.0,
+        "dangerous": bool((counts >= need).any()),
+        "hazard_frames": hazard_frames,
+        "hazard_mask": hazard_mask,
+    }
+
+
+def analyze_all(frames_bgr: np.ndarray, fps: float) -> dict:
+    """깜빡임(analyze)과 줄무늬(analyze_pattern)를 함께 판정. 위험 = 둘 중 하나라도 위험.
+
+    hazard_frames·hazard_mask 는 두 판정의 합집합. 휘도와 픽셀 전이는 한 번만 계산한다.
+    """
+    lum = luminance_cd(frames_bgr)
+    signed = pixel_transitions(lum)
+    flash = analyze(frames_bgr, fps, lum=lum, signed=signed)
+    pattern = analyze_pattern(frames_bgr, fps, lum=lum, signed=signed)
+    return {
+        "flash": flash,
+        "pattern": pattern,
+        "dangerous": bool(flash["dangerous"] or pattern["dangerous"]),
+        "hazard_frames": flash["hazard_frames"] | pattern["hazard_frames"],
+        "hazard_mask": flash["hazard_mask"] | pattern["hazard_mask"],
     }
 
 

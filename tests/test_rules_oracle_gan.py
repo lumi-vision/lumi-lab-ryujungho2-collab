@@ -175,6 +175,10 @@ def test_soft_judge_tracks_hard_judge_on_simple_flicker():
 
 def test_judge_loss_gradient_reaches_generator():
     from lumi_synth.gan import LightGenerator, judge_loss, luminance_rel, srgb_to_linear
+    # 시드 고정 (2026-11-09): 고정 전에는 전체 실행 3번 중 1번 실패했다. 무작위 초기값·입력에 따라 손실이
+    # 0(목표를 이미 만족)이 되어 기울기가 0인 경우가 있었기 때문이다. 이 테스트는 '기울기 경로가 이어져 있는가'를
+    # 보는 것이므로 결과가 매번 같도록 시드를 고정한다.
+    torch.manual_seed(0)
     g = LightGenerator(width=8, zdim=4, fps=24.0)
     clean = torch.rand(2, 3, 24, 32, 32) * 0.3
     mask = torch.ones(2, 1, 1, 32, 32)
