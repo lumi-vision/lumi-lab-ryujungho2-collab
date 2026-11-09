@@ -1,7 +1,7 @@
 # 환경·해상도 차이로 생긴 문제와 판정 해상도 정리 (2026-11-09)
 
 > 측정 근거: `checks/rules/resolution_sensitivity.md` (`scripts/resolution_sensitivity.py`), `checks/rules/gamma_sensitivity.md`, `checks/rules/README.md`, `docs/CHANGELOG_2026-11-09.md`.
-> 이 문서의 §4 는 **제안**이며 아직 코드 기본값을 바꾸지 않았다.
+> **결정 (같은 날)**: 판정 해상도 = 학습 해상도 = **768×432** 로 통일(§4 의 '긴 변 720 판정 + 조각 학습' 제안 대신). 적용 내용은 `docs/DATA_PLAN.md` §8.
 
 ## 1. 무엇이 문제였나 — 환경별 차이와 실제로 생긴 오류
 

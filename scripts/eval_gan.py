@@ -1,6 +1,6 @@
 """학습한 G 를 검증 분할(val)에서 평가하고, GAN 데이터셋(정답 포함)을 저장한다.
 
-실행 예:  python scripts/eval_gan.py --scale 0.5 --z-per-clip 4
+실행 예:  python scripts/eval_gan.py --checkpoint data/gan/<이름>.pt --z-per-clip 4
 
 무엇을 재나 (docs/GAN.md §5) — 모든 판정은 하드 판정 규칙(measure.analyze)으로 다시 잰다
     1. 조절력   목표 '위험' → 실제 위험 비율, 목표 '문턱 근처 안전' → 실제 안전이면서 깜빡임 1~3회/초 비율
@@ -149,7 +149,7 @@ def summarize(rows):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="G 평가와 GAN 데이터셋 저장")
-    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_128x72_24fps")
+    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_768x432_24fps")
     ap.add_argument("--allow-mismatch", action="store_true", help="G 학습 해상도·fps 와 달라도 진행(기록됨)")
     ap.add_argument("--checkpoint", type=Path, default=ROOT / "data" / "gan" / "gan.pt")
     ap.add_argument("--out", type=Path, default=ROOT / "data" / "gan")

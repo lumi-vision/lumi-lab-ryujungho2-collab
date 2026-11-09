@@ -1,11 +1,12 @@
 """오라클 데이터셋 만들기: 깨끗한 바탕 클립 × 설계 의도 4종 → (Y, X, M, 정답) 쌍.
 
-실행 예
-    노트북 트랙(기본, 약 6분):  python scripts/make_oracle_dataset.py
-    집 PC 트랙(PLAN.md):       python scripts/make_oracle_dataset.py --width 1920 --height 1080 --fps 30 --frames 150 \
-                                   --train BigBuckBunny_1080p.mov:30:420 --val BigBuckBunny_1080p.mov:450:560 \
-                                   --test elephantsdream-480-h264-st-aac.mov:20:620
-    (원본보다 큰 해상도로는 키우지 않는 것이 원칙 — 시험 분할 원본도 1080p 영상으로 바꿔야 한다)
+실행 예 (판정·학습 해상도 768×432 통일, 2026-11-09 결정)
+    python scripts/make_oracle_dataset.py --test <768×432 이상 시험 영상(data/ 기준 경로)>:<시작초>:<끝초>
+    - train·val 기본 원본: data/sources/big_buck_bunny_1080p/big_buck_bunny_1080p_h264.mov (step0_check.py 가 받음)
+    - test 기본 원본 Elephants Dream(data/raw)은 480×270 이라 768×432 로 쓸 수 없다(확대 금지 → 오류로 멈춤).
+      다른 영화의 768×432 이상 영상을 --test 로 지정해야 한다(후보: Sintel 1080p, Elephants Dream HD — 미확보).
+    128×72 예비 실험 재현: --width 128 --height 72 --train raw/BigBuckBunny_640x360.m4v:30:420
+                          --val raw/BigBuckBunny_640x360.m4v:450:560 --test raw/elephantsdream-480-h264-st-aac.mov:20:620
 
 출력
     data/oracle_<트랙>/{train,val,test}/<id>.npz   (트랙 = 예: 128x72_24fps)   clean(Y), flicker(X), mask_allow(M), mask_changed,
@@ -36,10 +37,10 @@ from lumi_synth import measure, oracle
 from lumi_synth.data import ClipSpec, file_sha256, save_sample, scan_clean_clips
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCES = {
-    "train": ("BigBuckBunny_640x360.m4v", 30, 420),
-    "val": ("BigBuckBunny_640x360.m4v", 450, 560),
-    "test": ("elephantsdream-480-h264-st-aac.mov", 20, 620),
+SOURCES = {   # 경로는 --raw(기본 data/) 기준
+    "train": ("sources/big_buck_bunny_1080p/big_buck_bunny_1080p_h264.mov", 30, 420),
+    "val": ("sources/big_buck_bunny_1080p/big_buck_bunny_1080p_h264.mov", 450, 560),
+    "test": ("raw/elephantsdream-480-h264-st-aac.mov", 20, 620),   # 480×270: 768×432 에는 못 씀 → --test 로 바꿀 것
 }
 
 
@@ -52,10 +53,10 @@ def failed_condition(flicker: np.ndarray, fps: float) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--raw", type=Path, default=ROOT / "data" / "raw")
+    ap.add_argument("--raw", type=Path, default=ROOT / "data", help="원본 경로의 기준 폴더 (기본 data/)")
     ap.add_argument("--out", type=Path, default=None, help="생략하면 data/oracle_<트랙>")
-    ap.add_argument("--width", type=int, default=128)
-    ap.add_argument("--height", type=int, default=72)
+    ap.add_argument("--width", type=int, default=768)
+    ap.add_argument("--height", type=int, default=432)
     ap.add_argument("--frames", type=int, default=48)
     ap.add_argument("--fps", type=float, default=24.0)
     ap.add_argument("--train", default=None, help="파일:시작초:끝초 (생략하면 기본 SOURCES)")
@@ -76,6 +77,20 @@ def main() -> int:
     rng = np.random.default_rng(args.seed)
     limits = {"train": args.train_clips, "val": args.val_clips, "test": args.test_clips}
     manifest, summary = [], []
+    # 시작 전에 모든 원본을 검사: 없거나 목표 해상도보다 작으면(확대 금지) 아무것도 만들지 않고 멈춘다.
+    import cv2
+    for split, (fname, _, _) in SOURCES.items():
+        src = args.raw / fname
+        if not src.exists():
+            print(f"[오류] {split} 원본이 없습니다: {src} (DATA_SOURCES.md 의 받는 법 참고)", file=sys.stderr)
+            return 2
+        cap = cv2.VideoCapture(str(src))
+        sw, sh = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        if sw < spec.width or sh < spec.height:
+            print(f"[오류] {split} 원본 {src.name} 이 {sw}×{sh} 로 목표 {spec.width}×{spec.height} 보다 작습니다(확대 금지). "
+                  f"--{split} 로 더 큰 영상을 지정하세요.", file=sys.stderr)
+            return 2
     t0 = time.time()
     for split, (fname, s0, s1) in SOURCES.items():
         src = args.raw / fname

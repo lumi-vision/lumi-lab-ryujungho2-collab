@@ -31,13 +31,14 @@ SCENE_CUT_MAD = 40.0        # 연속 프레임 평균 절대 차이(0~255)가 �
 
 @dataclass(frozen=True)
 class ClipSpec:
-    """클립 규격 = '트랙'. 두 트랙을 같은 코드로 돌린다(docs/DATA_PLAN.md §7).
+    """클립 규격 = '트랙'. 판정 해상도 = 학습 해상도 = 768×432 로 통일(사용자 결정 2026-11-09, docs/RESOLUTION_ENV_REPORT.md).
 
-    - 노트북 트랙(기본): 128×72, 24 fps(원본 그대로), 48프레임(2초) — CPU 로 GAN 학습 가능한 크기
-    - 집 PC 트랙(PLAN.md): 1920×1080, 30 fps(24→30 프레임 복제), 150프레임(5초)
+    - 기본(통일 트랙): 768×432, 24 fps, 48프레임(2초). 768×432 는 16:9, 16 으로 나누어지고(생성기 축소 단계),
+      시청 조건 56 cm·15인치에서 1도당 23.3 픽셀 → 최고 11.6 cpd 라 줄무늬 1~10 cpd 를 표현·판정할 수 있다.
+    - 128×72 (예비 실험, 2026-11-09 까지): 깜빡임 전용. 줄무늬는 판정 불가(checks/rules/resolution_sensitivity.md).
     """
-    width: int = 128
-    height: int = 72
+    width: int = 768
+    height: int = 432
     frames: int = 48
     fps: float = 24.0
 
@@ -75,6 +76,11 @@ def read_clip(path: Path, start_frame: int, spec: ClipSpec, src_fps: float | Non
         ok, f = cap.read()
         if not ok:
             break
+        if f.shape[1] < spec.width or f.shape[0] < spec.height:
+            cap.release()
+            # 확대 금지: 원본보다 크게 만들면 없는 세부(가는 줄·작은 점)를 지어내지 못하고 흐려진 영상만 생긴다.
+            # (2026-11-09: 768×432 통일 때 시험 분할 Elephants Dream 이 480×270 이라 조용히 확대될 뻔함)
+            raise ValueError(f"원본 {f.shape[1]}×{f.shape[0]} 이 목표 {spec.width}×{spec.height} 보다 작습니다(확대 금지): {path}")
         if f.shape[1] != spec.width or f.shape[0] != spec.height:
             f = cv2.resize(f, (spec.width, spec.height), interpolation=cv2.INTER_AREA)
         src.append(f)

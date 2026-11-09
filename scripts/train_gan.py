@@ -1,8 +1,9 @@
 """조건부 GAN 학습. 재료는 오라클 단계가 만든 깨끗한 바탕 클립(backgrounds_train.npz)뿐이다.
 
 실행 예
-    노트북(CPU, 동작 확인용):  python scripts/train_gan.py --steps 300 --batch-size 2
-    집 PC(RTX 5080):           python scripts/train_gan.py --steps 4000 --batch-size 8 --width 32 --device cuda
+    집 PC(RTX 5080):  python scripts/train_gan.py --steps 4000 --batch-size 8 --width 32 --device cuda
+    (판정·학습 해상도 768×432 통일 — 2026-11-09. 노트북 CPU 로는 이 크기 학습이 사실상 어렵다. 동작 확인은
+     --scale 0.25 --debug-scale --steps 10 처럼 하고, 그 결과는 학습용 데이터에 쓰지 않는다.)
 
 한 스텝에서 일어나는 일 (docs/GAN.md §4 의 그림과 같은 순서)
     1. 바탕 Y 를 B 개 뽑는다. 마스크 M 은 오라클의 마스크 생성기(make_mask)로 면적 30~70% 를 뽑는다.
@@ -86,7 +87,7 @@ def to_tensor(clips_bgr: np.ndarray, device) -> torch.Tensor:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="LUMI 조건부 GAN 학습")
-    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_128x72_24fps",
+    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_768x432_24fps",
                     help="오라클 단계의 데이터 폴더(트랙). backgrounds_train.npz 의 fps·해상도를 그대로 쓴다")
     ap.add_argument("--checkpoint", type=Path, default=ROOT / "data" / "gan" / "gan.pt")
     ap.add_argument("--log", type=Path, default=ROOT / "checks" / "gan" / "train_log.jsonl")
@@ -101,8 +102,13 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cpu", choices=("cpu", "cuda"))
     ap.add_argument("--scale", type=float, default=1.0,
-                    help="학습 해상도 배율(노트북 CPU 동작 확인은 0.5 → 64×36). 면적 비율은 해상도와 무관")
+                    help="학습 해상도 배율. 판정 해상도 = 학습 해상도 원칙이라 1.0 만 허용(그 외는 --debug-scale)")
+    ap.add_argument("--debug-scale", action="store_true",
+                    help="배율 ≠ 1.0 을 동작 확인용으로만 허용. 결과는 학습용 데이터에 쓸 수 없다(check_track 이 막음)")
     args = ap.parse_args()
+    if args.scale != 1.0 and not args.debug_scale:
+        raise SystemExit(f"--scale {args.scale}: 판정 해상도와 학습 해상도를 통일하기로 했다(2026-11-09). "
+                         "동작 확인만이라면 --debug-scale 를 함께 주세요.")
     if args.batch_size < 2 or args.batch_size % 2:
         raise SystemExit("--batch-size 는 2 이상의 짝수여야 합니다(목표 '위험'/'근처 안전'을 절반씩).")
 

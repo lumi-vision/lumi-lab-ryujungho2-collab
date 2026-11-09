@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @torch.no_grad()
 def main() -> int:
     ap = argparse.ArgumentParser(description="탐지 모델 학습용 GAN 샘플 (train 바탕만)")
-    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_128x72_24fps")
+    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_768x432_24fps")
     ap.add_argument("--allow-mismatch", action="store_true", help="G 학습 해상도·fps 와 달라도 진행(기록됨)")
     ap.add_argument("--checkpoint", type=Path, required=True)
     ap.add_argument("--out", type=Path, default=None, help="생략하면 data/gan_train_<데이터 트랙 이름>")

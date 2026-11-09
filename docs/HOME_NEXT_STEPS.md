@@ -26,7 +26,7 @@ python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_
 pytest
 ```
 
-**합격**: 36 passed (노트북 결과와 같음, 2026-11-09 `0e56368` 기준). 하나라도 실패하면 멈추고 실패 내용을 기록.
+**합격**: 37 passed (노트북 결과와 같음, 2026-11-09 해상도 통일 커밋 기준). 하나라도 실패하면 멈추고 실패 내용을 기록.
 
 ## 2. 판정 규칙 외부 검증 결과 확인
 
@@ -36,58 +36,49 @@ pytest
 - 유형 B(간섭): 화면 전이를 '같은 영역의 반대 방향 변화'끼리만 짝짓도록 바꿀지(D1 의 한계 해소).
 - 유형 C: pse-test-media 에 기대값(JSON)과 목록 파일이 다른 이유 확인(이슈 등록 고려).
 
-## 3. 두 트랙 원칙 (docs/DATA_PLAN.md §7)
+## 3. 해상도 원칙: 판정 = 학습 = 768×432 (docs/DATA_PLAN.md §8)
 
-노트북 = 저해상도 트랙 `128x72_24fps`, 집 PC = 고해상도 트랙 `1920x1080_30fps`. 같은 코드를 인자만 바꿔 돌리고, **산출물을 섞지 않는다**(폴더·보고서·체크포인트에 트랙 태그, 다르면 스크립트가 멈춤). 합칠지는 §7 결과로 정한다.
+2026-11-09 에 두 트랙(128×72 / 1920×1080) 계획을 접고 한 해상도로 통일했다. 128×72 결과는 깜빡임 전용 예비 실험.
 
-## 4. 저해상도 트랙을 GPU 로 마무리 (`128x72_24fps`)
+## 4. 시험 분할 원본 정하기 (먼저)
 
-노트북은 CPU 라 GAN 을 64×36(배율 0.5)으로만 학습했고, 그래서 학습용 GAN 샘플을 만들 수 없었다(해상도 불일치로 삭제). 집 PC 에서 **같은 트랙을 배율 1.0** 으로 학습한다.
+Elephants Dream(480×270)은 768×432 보다 작아 쓸 수 없다(확대 금지 → 스크립트가 멈춤). 학습 영화(BBB)와 다른 영화의 768×432 이상 영상을 하나 받아 `DATA_SOURCES.md` 에 출처·라이선스·SHA256 을 적는다. 후보: Sintel 1080p, Elephants Dream HD.
+
+## 5. 오라클 데이터셋 (768×432)
 
 ```powershell
-python scripts/make_oracle_dataset.py                                  # data/oracle_128x72_24fps (노트북과 같은 시드 → 같은 결과여야 함)
-# 원인 분리(시드 반복): λ_div 0.05 / 0.5 × 시드 0·1·2
+python scripts/step0_check.py                       # BBB 1080p 가 없으면 받음
+python scripts/make_oracle_dataset.py --test <data/ 기준 경로>:<시작초>:<끝초>
+```
+
+**확인**: `checks/oracle/768x432_24fps.md` 의 의도-판정 일치율(128×72 예비 실험 351/352 와 비교), 클립 하나 용량·생성 시간 기록.
+
+## 6. GAN (768×432, GPU)
+
+```powershell
+# 원인 분리(시드 반복): λ_div 0.05 / 0.5 × 시드 0·1·2 — 메모리가 넘치면 --batch-size 2
 foreach ($s in 0,1,2) { foreach ($d in 0.05,0.5) {
-  python scripts/train_gan.py --device cuda --steps 500 --batch-size 4 --scale 1.0 --lambda-div $d --seed $s `
-    --checkpoint data/gan/l_div${d}_s${s}.pt --log checks/gan/train_log_l_div${d}_s${s}.jsonl
-  python scripts/eval_gan.py --checkpoint data/gan/l_div${d}_s${s}.pt --out data/gan/l_div${d}_s${s} --report checks/gan/l_div${d}_s${s}.md
+  python scripts/train_gan.py --device cuda --steps 500 --batch-size 4 --lambda-div $d --seed $s `
+    --checkpoint data/gan/u_div${d}_s${s}.pt --log checks/gan/train_log_u_div${d}_s${s}.jsonl
+  python scripts/eval_gan.py --checkpoint data/gan/u_div${d}_s${s}.pt --out data/gan/u_div${d}_s${s} --report checks/gan/u_div${d}_s${s}.md
 } }
-# 본 학습 (λ_div 는 위 결과로 정함) → 학습용 GAN 샘플
-python scripts/train_gan.py --device cuda --steps 4000 --batch-size 8 --width 32 --scale 1.0 --lambda-div <값> --seed 0 `
-  --checkpoint data/gan/l_full_s0.pt --log checks/gan/train_log_l_full_s0.jsonl
-python scripts/eval_gan.py --checkpoint data/gan/l_full_s0.pt --out data/gan/l_full_s0 --report checks/gan/l_full_s0.md
-python scripts/make_gan_dataset.py --checkpoint data/gan/l_full_s0.pt --z-per-clip 2   # → data/gan_train_128x72_24fps
+# 본 학습 → 학습용 GAN 샘플
+python scripts/train_gan.py --device cuda --steps 4000 --batch-size 8 --width 32 --lambda-div <값> --seed 0 `
+  --checkpoint data/gan/u_full_s0.pt --log checks/gan/train_log_u_full_s0.jsonl
+python scripts/make_gan_dataset.py --checkpoint data/gan/u_full_s0.pt --z-per-clip 2
 ```
 
-**확인**: `checks/oracle/128x72_24fps.md` 가 노트북 결과(의도-판정 351/352)와 같은지. GAN: 목표 위험 → 위험 ≥ 95%, 근처 → 안전 & 1~3회/초 ≥ 90%, 마스크 밖 0, z 주파수 std 가 시드마다 같은 방향인지(잠정 기준). 배치 8 이 16 GB 를 넘으면 4.
+**확인**: 첫 실행에서 GPU 메모리·스텝당 시간 기록(미측정). 목표 위험 → 위험 ≥ 95%, 근처 → 안전 & 1~3회/초 ≥ 90%, 마스크 밖 0, z 주파수 std 가 시드마다 같은 방향인지.
 
-## 5. 고해상도 트랙 오라클 (`1920x1080_30fps`, PLAN.md 기준)
-
-```powershell
-python scripts/make_oracle_dataset.py --width 1920 --height 1080 --fps 30 --frames 150 `
-  --train big_buck_bunny_1080p_h264.mov:30:420 --val big_buck_bunny_1080p_h264.mov:450:560 `
-  --test Sintel.2010.1080p.mkv:<시작>:<끝> --raw <영상 폴더>
-```
-
-- 시험 분할 원본도 1080p 여야 한다(Elephants Dream 은 480p 라 키우지 않는다). 후보: Sintel 1080p(24 fps → 30 fps 복제). 영화 단위 분할 유지.
-- 1080p·150프레임 클립 하나가 압축 전 약 0.9 GB → npz 저장 용량·시간을 먼저 2~3개로 시험. 필요하면 저장을 FFV1(.mkv)+PNG+CSV 로 바꿔야 함(미구현).
-- 판정 규칙 계산 메모리: 휘도 float32 150×1920×1080 ≈ 1.2 GB (64 GB RAM 에서 가능, 미측정).
-
-## 6. 고해상도 트랙 GAN (설계 결정 필요)
-
-1080p·150프레임을 3D 합성곱으로 직접 학습하는 것은 16 GB 에서 어려울 것으로 예상(미측정). 둘 중 하나를 고른다(둘 다 미구현):
-- (a) 중간 해상도 트랙(예: `480x270_30fps`)을 하나 더 만들어 오라클·GAN 을 같은 방식으로 돌린다 — 코드 수정 없이 인자만으로 가능.
-- (b) 작업 해상도에서 만든 빛 Δ 를 1080p 로 키워 1080p 바탕에 더하고, 1080p 에서 판정 — `gan.py` 에 확대·합성 단계 추가 필요.
-
-## 7. 트랙 합치기와 아직 설계도 없는 것 (집에서 결정할 것)
+## 7. 아직 설계도 없는 것 (집에서 결정할 것)
 
 | 항목 | 필요한 결정 |
 |---|---|
 | 탐지 모델(H1: 오라클만 vs 오라클+GAN) | 모델 구조(프레임 단위 vs 시공간), 입력 해상도, 출력(위험 여부 / hazard_mask / hazard_frames), 같은 샘플 수 비교 방법, 평가 지표 |
 | 실제 영상 시험셋 | 합성하지 않은 시험 영상의 출처(예: South 2021 위험 GIF 163개, 재배포 불가·시험 전용)와 라벨 기준 |
-| 판정 해상도 통일 | `docs/RESOLUTION_ENV_REPORT.md` §4 제안(긴 변 720 통일, 128×72 는 깜빡임 전용, 고해상도 GAN 은 전체 판정 후 조각 학습) 채택 여부 |
+| 줄무늬 판정 속도 | 768×432·48프레임 판정 시간 측정, 느리면 구간 표시 부분 최적화 또는 GPU 이전 |
+| fps | 24 유지 또는 30(PLAN.md) — 해상도 통일 결정에는 포함되지 않음 |
 | 감마 가정(A1) | `checks/rules/gamma_sensitivity.md` §3 이 70/210 에서 중단됨(노트북 메모리 부족). `python scripts/gamma_sensitivity.py --pse bt1886 -- --pse-root <경로> --sets all-luminance` 로 210개 완료 후 sRGB 유지 여부 결정 |
-| 트랙 합치기 | DATA_PLAN §7 기준: 같은 조건을 1080p 로 합성한 것과 128×72 로 줄인 것의 판정 일치율(해상도 민감도 스크립트 미구현), 두 트랙의 경향 비교 |
 | 1단계(`step1_cut.py`) 재실행 | 규칙 변경으로 `events` 의미가 바뀜(화면 전이). PLAN 의 1080p·30fps 기준으로 다시 할지 |
 | 실제 영상과의 분포 거리 | 자연스러움의 코드 지표 추가 여부(예: 프레임 특징 분포 비교) |
 

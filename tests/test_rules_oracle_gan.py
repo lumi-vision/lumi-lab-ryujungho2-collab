@@ -206,9 +206,24 @@ def test_soft_judge_counts_opposite_phase_once(hz):
 
 # ---------------------------------------------------------------- 트랙(해상도·fps)
 def test_track_tag():
+    # 판정 해상도 = 학습 해상도 = 768×432 로 통일(2026-11-09). 128×72 는 예비 실험 재현용.
     from lumi_synth.data import ClipSpec
-    assert ClipSpec().tag == "128x72_24fps"
-    assert ClipSpec(1920, 1080, 150, 30.0).tag == "1920x1080_30fps"
+    assert ClipSpec().tag == "768x432_24fps"
+    assert ClipSpec(128, 72).tag == "128x72_24fps"
+
+
+def test_read_clip_refuses_upscaling(tmp_path):
+    # 원본(64×36)보다 큰 목표(128×72)는 확대하지 않고 멈춘다 — 480×270 Elephants Dream 이 조용히 확대될 뻔한 일 방지.
+    import cv2
+    from lumi_synth.data import ClipSpec, read_clip
+    path = tmp_path / "small.avi"
+    vw = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), 24.0, (64, 36))
+    for _ in range(5):
+        vw.write(np.full((36, 64, 3), 100, np.uint8))
+    vw.release()
+    with pytest.raises(ValueError, match="확대 금지"):
+        read_clip(path, 0, ClipSpec(128, 72, 4, 24.0))
+    assert read_clip(path, 0, ClipSpec(32, 18, 4, 24.0)).shape == (4, 18, 32, 3)   # 축소는 허용
 
 
 def test_24_to_30_duplication_adds_no_flicker_and_keeps_rate():
