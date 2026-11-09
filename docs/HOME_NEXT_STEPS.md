@@ -85,6 +85,7 @@ python scripts/make_oracle_dataset.py --width 1920 --height 1080 --fps 30 --fram
 |---|---|
 | 탐지 모델(H1: 오라클만 vs 오라클+GAN) | 모델 구조(프레임 단위 vs 시공간), 입력 해상도, 출력(위험 여부 / hazard_mask / hazard_frames), 같은 샘플 수 비교 방법, 평가 지표 |
 | 실제 영상 시험셋 | 합성하지 않은 시험 영상의 출처(예: South 2021 위험 GIF 163개, 재배포 불가·시험 전용)와 라벨 기준 |
+| 감마 가정(A1) | `checks/rules/gamma_sensitivity.md` §3 이 70/210 에서 중단됨(노트북 메모리 부족). `python scripts/gamma_sensitivity.py --pse bt1886 -- --pse-root <경로> --sets all-luminance` 로 210개 완료 후 sRGB 유지 여부 결정 |
 | 트랙 합치기 | DATA_PLAN §7 기준: 같은 조건을 1080p 로 합성한 것과 128×72 로 줄인 것의 판정 일치율(해상도 민감도 스크립트 미구현), 두 트랙의 경향 비교 |
 | 1단계(`step1_cut.py`) 재실행 | 규칙 변경으로 `events` 의미가 바뀜(화면 전이). PLAN 의 1080p·30fps 기준으로 다시 할지 |
 | 실제 영상과의 분포 거리 | 자연스러움의 코드 지표 추가 여부(예: 프레임 특징 분포 비교) |
