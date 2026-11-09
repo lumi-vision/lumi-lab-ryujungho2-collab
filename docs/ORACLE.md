@@ -1,6 +1,6 @@
 # 오라클 (규칙 기반 합성기)
 
-> 코드: `src/lumi_synth/oracle.py` · 실행: `scripts/make_oracle_dataset.py` · 결과: `checks/oracle/README.md`
+> 코드: `src/lumi_synth/oracle.py` · 실행: `scripts/make_oracle_dataset.py` · 결과: `checks/oracle/128x72_24fps.md`
 
 ## 1. 역할
 
@@ -36,7 +36,7 @@ pse-test-media 의 f/a/c/l 설계처럼 **조건 하나만 일부러 무너뜨�
 
 ## 4. 정답은 의도가 아니라 판정
 
-샘플의 라벨 = `measure.analyze` 의 결과. 의도와 판정이 다르면 `intent_ok=False` 와 무너진 조건을 manifest 에 기록하고, **버리지 않는다**(판정 결과대로 라벨). 의도-판정 일치율이 오라클의 신뢰도이며 `checks/oracle/README.md` 에 분할별로 적는다.
+샘플의 라벨 = `measure.analyze` 의 결과. 의도와 판정이 다르면 `intent_ok=False` 와 무너진 조건을 manifest 에 기록하고, **버리지 않는다**(판정 결과대로 라벨). 의도-판정 일치율이 오라클의 신뢰도이며 `checks/oracle/128x72_24fps.md` 에 분할별로 적는다.
 
 2026-11-09 기록 (실측):
 
@@ -47,7 +47,7 @@ pse-test-media 의 f/a/c/l 설계처럼 **조건 하나만 일부러 무너뜨�
 
 ## 5. 저장 형식
 
-`data/oracle/<split>/<id>.npz` (무손실, 영상 파일로 만들지 않음 — 위험 자극을 실수로 재생하지 않도록)
+`data/oracle_<트랙>/<split>/<id>.npz` (무손실, 영상 파일로 만들지 않음 — 위험 자극을 실수로 재생하지 않도록)
 
 | 배열 | 뜻 |
 |---|---|

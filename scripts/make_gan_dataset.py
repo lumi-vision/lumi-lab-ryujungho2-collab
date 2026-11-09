@@ -31,7 +31,7 @@ from lumi_synth.data import save_sample
 from lumi_synth.gan import LightGenerator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from train_gan import rescale_clips, sample_masks, to_tensor  # noqa: E402
+from train_gan import check_track, load_backgrounds, rescale_clips, sample_masks, to_tensor  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,9 +39,10 @@ ROOT = Path(__file__).resolve().parents[1]
 @torch.no_grad()
 def main() -> int:
     ap = argparse.ArgumentParser(description="탐지 모델 학습용 GAN 샘플 (train 바탕만)")
-    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle")
+    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_128x72_24fps")
+    ap.add_argument("--allow-mismatch", action="store_true", help="G 학습 해상도·fps 와 달라도 진행(기록됨)")
     ap.add_argument("--checkpoint", type=Path, required=True)
-    ap.add_argument("--out", type=Path, default=ROOT / "data" / "gan_train")
+    ap.add_argument("--out", type=Path, default=None, help="생략하면 data/gan_train_<데이터 트랙 이름>")
     ap.add_argument("--z-per-clip", type=int, default=2)
     ap.add_argument("--scale", type=float, default=None, help="생략하면 학습 때 배율")
     ap.add_argument("--seed", type=int, default=2026)
@@ -49,12 +50,14 @@ def main() -> int:
 
     ck = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     cfg = ck["config"]
-    fps = float(cfg["fps"])
     scale = args.scale if args.scale is not None else float(cfg.get("scale", 1.0))
-    bg = np.load(args.data / "backgrounds_train.npz")["clips"]
-    if bg.ndim != 5 or len(bg) == 0:
-        raise SystemExit(f"train 바탕이 없습니다: {args.data}/backgrounds_train.npz")
+    bg, fps = load_backgrounds(args.data, "train")
     bg = rescale_clips(bg, scale)
+    check_track(cfg, bg, fps, args.allow_mismatch)
+    # 오라클 샘플과 섞어 쓸 데이터이므로 오라클 트랙과 해상도가 같아야 한다(배율 1.0)
+    if scale != 1.0 and not args.allow_mismatch:
+        raise SystemExit(f"배율 {scale}: 오라클 데이터({args.data.name})와 해상도가 달라 학습용으로 섞을 수 없습니다.")
+    args.out = args.out or ROOT / "data" / f"gan_train_{args.data.name.removeprefix('oracle_')}"
     rng = np.random.default_rng(args.seed)
     torch.manual_seed(args.seed)
     masks = sample_masks(len(bg), bg.shape[2], bg.shape[3], rng)
@@ -81,7 +84,8 @@ def main() -> int:
                     {"split": "train", "purpose": "training", "generator": "LightGenerator",
                      "checkpoint": str(args.checkpoint.name),
                      "soft_judge_version": cfg.get("soft_judge_version", "v0"),
-                     "target": target, "z_index": k, "fps": fps,
+                     "target": target, "z_index": k, "fps": fps, "width": int(bg.shape[3]), "height": int(bg.shape[2]),
+                     "data_track": args.data.name,
                      "label_dangerous": bool(r["dangerous"]), "max_flashes": r["max_flashes"],
                      "peak_area": r["peak_area"], "label_source": "lumi_synth.measure.analyze"}))
     args.out.mkdir(parents=True, exist_ok=True)
@@ -92,6 +96,7 @@ def main() -> int:
     lines = ["# 학습용 GAN 샘플 (train 바탕만)", "",
              f"- 만든 날: {time.strftime('%Y-%m-%d %H:%M')} · {time.time() - t0:.0f}초",
              f"- 체크포인트: `{args.checkpoint.name}` (소프트 판정기 {cfg.get('soft_judge_version', 'v0')}), 배율 {scale}",
+             f"- 해상도 {bg.shape[3]}×{bg.shape[2]}, {fps:g} fps, 데이터 트랙 `{args.data.name}`",
              f"- train 바탕 {len(bg)}개 × 목표 2종 × z {args.z_per_clip}개 = {len(manifest)}개", "",
              "| 목표 | 판정 위험 | 판정 안전 |", "|---|---|---|"]
     for target in ("hazard", "near"):

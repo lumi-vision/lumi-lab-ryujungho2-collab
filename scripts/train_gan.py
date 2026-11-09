@@ -45,6 +45,40 @@ def rescale_clips(clips: np.ndarray, scale: float) -> np.ndarray:
     return np.stack([[cv2.resize(f, size, interpolation=cv2.INTER_AREA) for f in c] for c in clips])
 
 
+def load_backgrounds(data_dir: Path, split: str) -> tuple[np.ndarray, float]:
+    """backgrounds_<split>.npz → (클립, fps). fps 가 없는 옛 파일은 거부한다."""
+    npz = np.load(data_dir / f"backgrounds_{split}.npz")
+    clips = npz["clips"]
+    if clips.ndim != 5 or len(clips) == 0:
+        raise SystemExit(f"{split} 바탕이 없습니다: {data_dir}/backgrounds_{split}.npz")
+    if "fps" not in npz:
+        raise SystemExit(f"{data_dir}/backgrounds_{split}.npz 에 fps 가 없습니다. make_oracle_dataset.py 로 다시 만드세요.")
+    return clips, float(npz["fps"])
+
+
+def check_track(cfg: dict, clips: np.ndarray, fps: float, allow_mismatch: bool) -> None:
+    """G 를 학습한 해상도·fps 와 지금 넣으려는 바탕의 해상도·fps 가 같은지 확인한다.
+
+    G 는 완전 합성곱이라 다른 해상도에도 오류 없이 돌아간다 → 조용히 다른 조건의 데이터가 만들어진다
+    (2026-11-09: 64×36 으로 학습한 G 의 샘플이 128×72 오라클과 섞일 뻔함). 그래서 다르면 멈춘다.
+    """
+    want_hw = tuple(cfg.get("train_hw", ()))
+    have_hw = tuple(clips.shape[2:4])
+    problems = []
+    if want_hw and want_hw != have_hw:
+        problems.append(f"해상도: G 학습 {want_hw[1]}×{want_hw[0]} ≠ 바탕 {have_hw[1]}×{have_hw[0]}")
+    if abs(float(cfg.get("fps", fps)) - fps) > 1e-6:
+        problems.append(f"fps: G 학습 {cfg.get('fps')} ≠ 바탕 {fps}")
+    if not want_hw:
+        # 옛 체크포인트(2026-11-09 트랙 기록 이전): 체크포인트의 scale 을 그대로 썼다면 학습 때와 같은 해상도다.
+        print("[경고] 체크포인트에 학습 해상도(train_hw)가 없음(옛 체크포인트) — 체크포인트의 scale 로 맞춘 것으로 간주")
+    if problems and not allow_mismatch:
+        raise SystemExit("트랙 불일치로 중단합니다:\n  - " + "\n  - ".join(problems)
+                         + "\n의도한 것이면 --allow-mismatch (결과에 그대로 기록됨)")
+    for p in problems:
+        print(f"[경고] {p}")
+
+
 def to_tensor(clips_bgr: np.ndarray, device) -> torch.Tensor:
     """(B,T,H,W,3) uint8 → (B,3,T,H,W) float 0~1 (채널 순서는 BGR 그대로)."""
     return torch.from_numpy(clips_bgr).to(device).permute(0, 4, 1, 2, 3).float() / 255.0
@@ -52,7 +86,8 @@ def to_tensor(clips_bgr: np.ndarray, device) -> torch.Tensor:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="LUMI 조건부 GAN 학습")
-    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle")
+    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_128x72_24fps",
+                    help="오라클 단계의 데이터 폴더(트랙). backgrounds_train.npz 의 fps·해상도를 그대로 쓴다")
     ap.add_argument("--checkpoint", type=Path, default=ROOT / "data" / "gan" / "gan.pt")
     ap.add_argument("--log", type=Path, default=ROOT / "checks" / "gan" / "train_log.jsonl")
     ap.add_argument("--steps", type=int, default=300)
@@ -77,12 +112,16 @@ def main() -> None:
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise SystemExit("CUDA 를 요청했지만 사용할 수 없습니다.")
-    bg = np.load(args.data / "backgrounds_train.npz")["clips"]          # (N,T,H,W,3) uint8 BGR
+    npz = np.load(args.data / "backgrounds_train.npz")
+    bg = npz["clips"]                                                   # (N,T,H,W,3) uint8 BGR
     if bg.ndim != 5 or len(bg) == 0:
         raise SystemExit(f"바탕 클립이 없습니다: {args.data}/backgrounds_train.npz (make_oracle_dataset.py 먼저)")
     bg = rescale_clips(bg, args.scale)
     n, t, h, w, _ = bg.shape
-    fps = 24.0
+    # fps 는 데이터에서 읽는다(이전에는 24.0 고정 → 30fps 트랙에서 1초 창을 틀리게 잴 뻔함)
+    if "fps" not in npz:
+        raise SystemExit("backgrounds_train.npz 에 fps 가 없습니다. make_oracle_dataset.py 로 다시 만드세요.")
+    fps = float(npz["fps"])
     G = LightGenerator(args.width, args.zdim, fps).to(device)
     D = FrameDiscriminator(args.width).to(device)
     opt_g = torch.optim.Adam(G.parameters(), lr=args.lr, betas=(0.5, 0.999))
@@ -133,7 +172,8 @@ def main() -> None:
     args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"format": "lumi_light_gan_v1", "config": {k: str(v) if isinstance(v, Path) else v
                                                           for k, v in vars(args).items()} | {"fps": fps,
-                "soft_judge_version": SOFT_JUDGE_VERSION},
+                "soft_judge_version": SOFT_JUDGE_VERSION, "train_hw": [h, w], "frames": t,
+                "data_track": args.data.name},
                 "train_log": [json.loads(x) for x in args.log.read_text(encoding="utf-8").splitlines() if x],
                 "generator": G.state_dict(), "discriminator": D.state_dict()}, args.checkpoint)
     print("저장:", args.checkpoint)

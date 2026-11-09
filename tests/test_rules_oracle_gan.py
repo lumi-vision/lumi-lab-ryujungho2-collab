@@ -198,3 +198,25 @@ def test_soft_judge_counts_opposite_phase_once(hz):
     x = torch.from_numpy(v).permute(3, 0, 1, 2)[None].float() / 255
     soft = float(soft_judge(luminance_rel(srgb_to_linear(x)), fps)["count"][0])
     assert abs(soft - hard) <= 0.5, (hz, soft, hard)
+
+
+# ---------------------------------------------------------------- 트랙(해상도·fps)
+def test_track_tag():
+    from lumi_synth.data import ClipSpec
+    assert ClipSpec().tag == "128x72_24fps"
+    assert ClipSpec(1920, 1080, 150, 30.0).tag == "1920x1080_30fps"
+
+
+def test_24_to_30_duplication_adds_no_flicker_and_keeps_rate():
+    # PLAN.md 의 24→30 fps 변환(원본 4장마다 1장 복제)이 (1) 새 깜빡임을 만들지 않고 (2) 깜빡임 빈도를 유지하는지.
+    from lumi_synth.data import duplicate_schedule
+    idx = duplicate_schedule(150, 24.0, 30.0)
+    assert idx[0] == 0 and idx[-1] == 119 and (np.diff(idx) >= 0).all() and (np.diff(idx) <= 1).all()
+    assert len(set(idx.tolist())) == 120                        # 원본 120장(5초)을 빠짐없이 사용
+    still = np.repeat(np.full((1, 8, 8, 3), LO, np.uint8), 120, 0)
+    assert measure.analyze(still[idx], 30.0)["max_flashes"] == 0
+    t = np.arange(120) / 24.0
+    src = np.stack([np.full((8, 8, 3), HI if int(t_ * 5 * 2) % 2 else LO, np.uint8) for t_ in t])  # 5 Hz @24fps
+    before = measure.analyze(src, 24.0)["max_flashes"]
+    after = measure.analyze(src[idx], 30.0)["max_flashes"]
+    assert before == after == 5.0

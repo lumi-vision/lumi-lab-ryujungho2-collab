@@ -33,66 +33,64 @@ pytest
 노트북에서 실행한 결과: `checks/rules/README.md` (이 문서 §8 에 요약). 집 PC 에서는 다시 돌릴 필요 없음.
 불일치가 있었다면 §8 의 원인별 조치를 먼저 한다.
 
-## 3. GAN 원인 분리 실험 (짧게, 64×36)
+## 3. 두 트랙 원칙 (docs/DATA_PLAN.md §7)
 
-노트북 v0 → v1 에서 두 가지(소프트 판정기, λ_div)를 함께 바꿔 원인을 못 나눴다. 노트북에서 'v1 판정기 + λ_div 0.05' 를 돌렸다(결과: `checks/gan/v1_div005.md`, 이 문서 §8). 집 PC 에서는 **시드 반복**으로 신뢰도를 확인한다.
+노트북 = 저해상도 트랙 `128x72_24fps`, 집 PC = 고해상도 트랙 `1920x1080_30fps`. 같은 코드를 인자만 바꿔 돌리고, **산출물을 섞지 않는다**(폴더·보고서·체크포인트에 트랙 태그, 다르면 스크립트가 멈춤). 합칠지는 §7 결과로 정한다.
 
-```powershell
-foreach ($s in 1,2) {
-  foreach ($d in 0.05,0.5) {
-    python scripts/train_gan.py --device cuda --steps 500 --batch-size 4 --scale 0.5 --lambda-div $d --seed $s `
-      --checkpoint data/gan/abl_div${d}_s${s}.pt --log checks/gan/train_log_abl_div${d}_s${s}.jsonl
-    python scripts/eval_gan.py --checkpoint data/gan/abl_div${d}_s${s}.pt --out data/gan/abl_div${d}_s${s} `
-      --report checks/gan/abl_div${d}_s${s}.md
-  }
-}
-```
+## 4. 저해상도 트랙을 GPU 로 마무리 (`128x72_24fps`)
 
-**보는 것**: 'z 만 바꿨을 때 주 주파수 std' 와 '목표 위험 → 실제 위험' 이 시드 0·1·2 에서 같은 방향으로 움직이는지. 판정기 v0 은 코드에서 지웠으므로 v0 과의 비교는 노트북 결과(`checks/gan/README.md`)만 쓴다(필요하면 커밋 `89daf42` 의 `gan.py` 로 재현).
-
-## 4. GAN 본 학습 (128×72, GPU)
-
-λ_div 는 3단계 결과로 정한다(조절력을 잃지 않으면서 다양성이 큰 값).
+노트북은 CPU 라 GAN 을 64×36(배율 0.5)으로만 학습했고, 그래서 학습용 GAN 샘플을 만들 수 없었다(해상도 불일치로 삭제). 집 PC 에서 **같은 트랙을 배율 1.0** 으로 학습한다.
 
 ```powershell
-python scripts/train_gan.py --device cuda --steps 4000 --batch-size 8 --width 32 --scale 1.0 --lambda-div <정한 값> `
-  --seed 0 --checkpoint data/gan/full_s0.pt --log checks/gan/train_log_full_s0.jsonl
-python scripts/eval_gan.py --checkpoint data/gan/full_s0.pt --out data/gan/full_s0 --report checks/gan/full_s0.md
+python scripts/make_oracle_dataset.py                                  # data/oracle_128x72_24fps (노트북과 같은 시드 → 같은 결과여야 함)
+# 원인 분리(시드 반복): λ_div 0.05 / 0.5 × 시드 0·1·2
+foreach ($s in 0,1,2) { foreach ($d in 0.05,0.5) {
+  python scripts/train_gan.py --device cuda --steps 500 --batch-size 4 --scale 1.0 --lambda-div $d --seed $s `
+    --checkpoint data/gan/l_div${d}_s${s}.pt --log checks/gan/train_log_l_div${d}_s${s}.jsonl
+  python scripts/eval_gan.py --checkpoint data/gan/l_div${d}_s${s}.pt --out data/gan/l_div${d}_s${s} --report checks/gan/l_div${d}_s${s}.md
+} }
+# 본 학습 (λ_div 는 위 결과로 정함) → 학습용 GAN 샘플
+python scripts/train_gan.py --device cuda --steps 4000 --batch-size 8 --width 32 --scale 1.0 --lambda-div <값> --seed 0 `
+  --checkpoint data/gan/l_full_s0.pt --log checks/gan/train_log_l_full_s0.jsonl
+python scripts/eval_gan.py --checkpoint data/gan/l_full_s0.pt --out data/gan/l_full_s0 --report checks/gan/l_full_s0.md
+python scripts/make_gan_dataset.py --checkpoint data/gan/l_full_s0.pt --z-per-clip 2   # → data/gan_train_128x72_24fps
 ```
 
-시드 0·1·2 세 번. 걸린 시간·GPU 메모리를 보고서에 적는다(배치 8 이 16 GB 를 넘으면 4 로).
+**확인**: `checks/oracle/128x72_24fps.md` 가 노트북 결과(의도-판정 351/352)와 같은지. GAN: 목표 위험 → 위험 ≥ 95%, 근처 → 안전 & 1~3회/초 ≥ 90%, 마스크 밖 0, z 주파수 std 가 시드마다 같은 방향인지(잠정 기준). 배치 8 이 16 GB 를 넘으면 4.
 
-**합격(잠정)**: 목표 위험 → 위험 ≥ 95%, 근처 → 안전 & 1~3회/초 ≥ 90%, 마스크 밖 0, z 주파수 std 가 64×36 결과보다 작아지지 않음. 못 넘으면 원인 기록 후 λ 조정.
-
-## 5. 학습용 GAN 샘플 (128×72)
+## 5. 고해상도 트랙 오라클 (`1920x1080_30fps`, PLAN.md 기준)
 
 ```powershell
-python scripts/make_gan_dataset.py --checkpoint data/gan/full_s0.pt --z-per-clip 2
+python scripts/make_oracle_dataset.py --width 1920 --height 1080 --fps 30 --frames 150 `
+  --train big_buck_bunny_1080p_h264.mov:30:420 --val big_buck_bunny_1080p_h264.mov:450:560 `
+  --test Sintel.2010.1080p.mkv:<시작>:<끝> --raw <영상 폴더>
 ```
 
-노트북에서 만든 `data/gan_train` 은 **64×36** 이라 오라클 샘플(128×72)과 해상도가 다르다 → 집 PC 의 128×72 모델로 다시 만든다.
+- 시험 분할 원본도 1080p 여야 한다(Elephants Dream 은 480p 라 키우지 않는다). 후보: Sintel 1080p(24 fps → 30 fps 복제). 영화 단위 분할 유지.
+- 1080p·150프레임 클립 하나가 압축 전 약 0.9 GB → npz 저장 용량·시간을 먼저 2~3개로 시험. 필요하면 저장을 FFV1(.mkv)+PNG+CSV 로 바꿔야 함(미구현).
+- 판정 규칙 계산 메모리: 휘도 float32 150×1920×1080 ≈ 1.2 GB (64 GB RAM 에서 가능, 미측정).
 
-**합격**: `checks/gan/make_gan_dataset.md` 의 목표별 라벨 분포 기록. split 이 모두 train.
+## 6. 고해상도 트랙 GAN (설계 결정 필요)
 
-## 6. 바탕 다양화 (코드 수정 필요)
+1080p·150프레임을 3D 합성곱으로 직접 학습하는 것은 16 GB 에서 어려울 것으로 예상(미측정). 둘 중 하나를 고른다(둘 다 미구현):
+- (a) 중간 해상도 트랙(예: `480x270_30fps`)을 하나 더 만들어 오라클·GAN 을 같은 방식으로 돌린다 — 코드 수정 없이 인자만으로 가능.
+- (b) 작업 해상도에서 만든 빛 Δ 를 1080p 로 키워 1080p 바탕에 더하고, 1080p 에서 판정 — `gan.py` 에 확대·합성 단계 추가 필요.
 
-`scripts/make_oracle_dataset.py` 의 `SOURCES` 는 지금 BBB(train/val)·ED(test) 뿐이다. Sintel·Tears of Steel 을 추가하려면 `SOURCES` 를 '분할 → 여러 (파일, 구간)' 목록으로 바꿔야 한다(미구현). 영화 단위 분할 유지: 예) train = BBB + Sintel, val = ToS 일부, test = ED.
-
-**주의**: Sintel 1080p 는 24 fps, ToS 720p 는 24 fps 인지 먼저 확인(`scan_clean_clips` 가 fps 차이 > 1 이면 거부).
-
-## 7. 아직 설계도 없는 것 (집에서 결정할 것)
+## 7. 트랙 합치기와 아직 설계도 없는 것 (집에서 결정할 것)
 
 | 항목 | 필요한 결정 |
 |---|---|
 | 탐지 모델(H1: 오라클만 vs 오라클+GAN) | 모델 구조(프레임 단위 vs 시공간), 입력 해상도, 출력(위험 여부 / hazard_mask / hazard_frames), 같은 샘플 수 비교 방법, 평가 지표 |
 | 실제 영상 시험셋 | 합성하지 않은 시험 영상의 출처(예: South 2021 위험 GIF 163개, 재배포 불가·시험 전용)와 라벨 기준 |
+| 트랙 합치기 | DATA_PLAN §7 기준: 같은 조건을 1080p 로 합성한 것과 128×72 로 줄인 것의 판정 일치율(해상도 민감도 스크립트 미구현), 두 트랙의 경향 비교 |
 | 1단계(`step1_cut.py`) 재실행 | 규칙 변경으로 `events` 의미가 바뀜(화면 전이). PLAN 의 1080p·30fps 기준으로 다시 할지 |
 | 실제 영상과의 분포 거리 | 자연스러움의 코드 지표 추가 여부(예: 프레임 특징 분포 비교) |
 
 ## 8. 노트북에서 받은 최신 결과 요약 (채워 넣는 칸)
 
 - 규칙 외부 검증: (작성 예정)
-- 원인 분리 실험(v1 판정기 + λ_div 0.05): (작성 예정)
+- 원인 분리 실험(v1 판정기 + λ_div 0.05, 64×36): (작성 예정)
+- 저해상도 트랙 GAN 학습용 샘플: 64×36 이라 삭제(`checks/gan/make_gan_dataset.md`) → §4 에서 다시 만듦
 
 ## 9. 기록 규칙
 

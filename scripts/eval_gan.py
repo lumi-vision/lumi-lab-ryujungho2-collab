@@ -33,7 +33,7 @@ from lumi_synth.data import save_sample
 from lumi_synth.gan import LightGenerator, luminance_rel, soft_judge, srgb_to_linear
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from train_gan import rescale_clips, sample_masks, to_tensor  # noqa: E402  (같은 전처리를 재사용)
+from train_gan import check_track, load_backgrounds, rescale_clips, sample_masks, to_tensor  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -149,7 +149,8 @@ def summarize(rows):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="G 평가와 GAN 데이터셋 저장")
-    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle")
+    ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_128x72_24fps")
+    ap.add_argument("--allow-mismatch", action="store_true", help="G 학습 해상도·fps 와 달라도 진행(기록됨)")
     ap.add_argument("--checkpoint", type=Path, default=ROOT / "data" / "gan" / "gan.pt")
     ap.add_argument("--out", type=Path, default=ROOT / "data" / "gan")
     ap.add_argument("--scale", type=float, default=None, help="생략하면 학습 때 배율(체크포인트)을 그대로")
@@ -161,12 +162,10 @@ def main() -> int:
 
     ck = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     cfg = ck["config"]
-    fps = float(cfg["fps"])
     scale = args.scale if args.scale is not None else float(cfg.get("scale", 1.0))
-    bg = np.load(args.data / "backgrounds_val.npz")["clips"]
-    if bg.ndim != 5 or len(bg) == 0:
-        raise SystemExit(f"검증 바탕이 없습니다: {args.data}/backgrounds_val.npz")
+    bg, fps = load_backgrounds(args.data, "val")
     bg = rescale_clips(bg, scale)
+    check_track(cfg, bg, fps, args.allow_mismatch)
     rng = np.random.default_rng(args.seed)
     masks = sample_masks(len(bg), bg.shape[2], bg.shape[3], rng)
 
@@ -205,7 +204,8 @@ def write_report(args, cfg, ck, bg, st, su, so, secs):
         f"- 학습: {cfg['steps']}스텝, 배치 {cfg['batch_size']}, 폭 {cfg['width']}, z {cfg['zdim']}, "
         f"λ(판정/적대/다양성) = {cfg['lambda_judge']}/{cfg['lambda_adv']}/{cfg['lambda_div']}, "
         f"해상도 배율 {cfg.get('scale', 1.0)}, 장치 {cfg['device']}, 총 {last['elapsed_s']}초",
-        f"- 평가: 검증 바탕 {len(bg)}개 [{bg.shape[1]}×{bg.shape[2]}×{bg.shape[3]}] × 목표 2종 × z {args.z_per_clip}개",
+        f"- 평가: 검증 바탕 {len(bg)}개 [{bg.shape[1]}프레임 × {bg.shape[3]}×{bg.shape[2]}, {cfg['fps']} fps] × 목표 2종 × z {args.z_per_clip}개",
+        f"- 데이터 트랙: `{args.data.name}` (G 학습 트랙: `{cfg.get('data_track', '기록 없음(옛 체크포인트)')}`)",
         f"- 대조군: 같은 구조의 학습하지 않은 G",
         f"- 학습에 쓴 소프트 판정기: {cfg.get('soft_judge_version', 'v0 (리뷰 전: 반대 위상 2번 셈, +0.8 과대)')} · "
         f"평가의 소프트↔하드 일치는 현재 코드의 소프트 판정기 {__import__('lumi_synth.gan', fromlist=['x']).SOFT_JUDGE_VERSION} 로 잼",
