@@ -7,6 +7,10 @@
     2. 대리 일치 소프트 판정기의 전이 수와 하드 판정의 전이 수가 얼마나 맞는지(상관, 위험/안전 일치율)
     3. 다양성   같은 바탕·마스크·목표에서 z 만 바꿨을 때 깜빡임 수·주 주파수의 표준편차
     4. 국소성   마스크 밖 픽셀이 원본과 다른 개수 (0 이어야 함)
+    5. 자연스러움(코드 지표만 — 합성 결과는 위험 자극이라 사람이 보고 평가하지 않는다)
+       - 질감 보존율: 마스크 안 윤곽선 에너지(라플라시안) 출력/원본. 1 = 장면이 그대로 남음
+       - 빛 공간 변이계수: 마스크 안 빛 Δ 의 표준편차/평균. 오라클은 균일해서 0
+       같은 바탕·마스크에 오라클(hazard 조건)로 만든 결과도 함께 재서 기준으로 삼는다.
     대조군: 학습하지 않은 G(같은 구조, 무작위 초기값). 학습이 효과가 있었는지 보는 기준선.
 
 시험 분할(test, Elephants Dream)은 여기서 쓰지 않는다. 나중에 탐지 모델의 최종 평가에만 쓴다.
@@ -22,7 +26,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from lumi_synth import measure
+import cv2
+
+from lumi_synth import measure, oracle
 from lumi_synth.data import save_sample
 from lumi_synth.gan import LightGenerator, luminance_rel, soft_judge, srgb_to_linear
 
@@ -38,6 +44,43 @@ def dominant_freq(series: np.ndarray, fps: float) -> float:
     spec = np.abs(np.fft.rfft(s))
     freqs = np.fft.rfftfreq(len(s), 1.0 / fps)
     return float(freqs[1:][np.argmax(spec[1:])]) if len(spec) > 1 else 0.0
+
+
+def texture_ratio(x_bgr: np.ndarray, clean_bgr: np.ndarray, mask: np.ndarray) -> float:
+    """질감 보존율 = 마스크 안 |라플라시안| 평균(출력) / 같은 값(원본). sRGB 밝기(Y') 기준.
+
+    빛을 더하면 sRGB 곡선 때문에 밝은 쪽 대비가 눌려 값이 1보다 작아질 수 있다(오라클도 같음).
+    """
+    def energy(v):
+        y = (0.114 * v[..., 0] + 0.587 * v[..., 1] + 0.299 * v[..., 2]).astype(np.float32)
+        lap = np.stack([np.abs(cv2.Laplacian(f, cv2.CV_32F, ksize=3)) for f in y])
+        return float(lap[:, mask].mean()) if mask.any() else 0.0
+    base = energy(clean_bgr)
+    return energy(x_bgr) / base if base > 1e-6 else float("nan")
+
+
+def light_cv(delta: np.ndarray, mask: np.ndarray) -> float:
+    """빛 공간 변이계수: 빛이 켜진 프레임마다 마스크 안 Δ 의 std/mean 을 구해 평균. 0 = 균일(오라클)."""
+    vals = []
+    for f in delta:
+        inside = f[mask]
+        if inside.size and inside.mean() > 1e-3:
+            vals.append(float(inside.std() / inside.mean()))
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def oracle_baseline(bg: np.ndarray, masks: np.ndarray, fps: float, seed: int) -> dict:
+    """같은 바탕·마스크에 오라클 빛(hazard 조건의 파형·세기)을 넣었을 때의 질감 보존율과 위험 비율."""
+    rng = np.random.default_rng(seed)
+    tex, danger = [], []
+    for i in range(len(bg)):
+        p = oracle.sample_params("hazard", rng)
+        w = oracle.waveform(p, bg.shape[1], fps)
+        lin = oracle.srgb_to_linear(bg[i]) + (w[:, None, None] * p.delta_cd / measure.WHITE_CD)[..., None] * masks[i][None, :, :, None]
+        x = np.where(masks[i][None, :, :, None], oracle.linear_to_srgb(lin), bg[i])
+        tex.append(texture_ratio(x, bg[i], masks[i]))
+        danger.append(bool(measure.analyze(x, fps)["dangerous"]))
+    return {"texture_ratio": float(np.nanmean(tex)), "light_cv": 0.0, "hazard": (sum(danger), len(danger))}
 
 
 @torch.no_grad()
@@ -59,7 +102,9 @@ def evaluate(G, bg, masks, fps, z_per_clip, zdim, seed, save_dir=None):
                 row = {"clip": i, "target": target_name, "z": k, "dangerous": bool(r["dangerous"]),
                        "hard_transitions": 2 * r["max_flashes"], "max_flashes": r["max_flashes"],
                        "soft_count": soft, "peak_area": r["peak_area"], "outside_changed": outside,
-                       "dominant_hz": dominant_freq(s, fps), "mean_light_cd": float(s.mean() * measure.WHITE_CD)}
+                       "dominant_hz": dominant_freq(s, fps), "mean_light_cd": float(s.mean() * measure.WHITE_CD),
+                       "texture_ratio": texture_ratio(x, bg[i], masks[i]),
+                       "light_cv": light_cv(delta[0, 0].numpy(), masks[i])}
                 rows.append(row)
                 if save_dir is not None:
                     sid = f"val_{i:03d}_{target_name}_z{k}"
@@ -97,6 +142,8 @@ def summarize(rows):
         "overall_std_hz": float(np.std([r["dominant_hz"] for r in rows])),
         "outside_changed_max": int(max(r["outside_changed"] for r in rows)),
         "mean_light_cd": float(np.mean([r["mean_light_cd"] for r in rows])),
+        "texture_ratio": float(np.nanmean([r["texture_ratio"] for r in rows])),
+        "light_cv": float(np.mean([r["light_cv"] for r in rows])),
     }
 
 
@@ -108,6 +155,8 @@ def main() -> int:
     ap.add_argument("--scale", type=float, default=None, help="생략하면 학습 때 배율(체크포인트)을 그대로")
     ap.add_argument("--z-per-clip", type=int, default=4)
     ap.add_argument("--seed", type=int, default=123)
+    ap.add_argument("--report", type=Path, default=ROOT / "checks" / "gan" / "README.md",
+                    help="점검표 경로(실험마다 다르게 두면 이전 결과를 덮어쓰지 않음)")
     args = ap.parse_args()
 
     ck = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
@@ -132,18 +181,19 @@ def main() -> int:
                                 save_dir=args.out / "val")
     rows_u, _ = evaluate(untrained, bg, masks, fps, args.z_per_clip, int(cfg["zdim"]), args.seed)
     st, su = summarize(rows_t), summarize(rows_u)
+    so = oracle_baseline(bg, masks, fps, args.seed)
     with open(args.out / "manifest.jsonl", "w", encoding="utf-8") as f:
         for row in manifest:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     (ROOT / "checks" / "gan").mkdir(parents=True, exist_ok=True)
-    (ROOT / "checks" / "gan" / "eval_rows.jsonl").write_text(
+    args.report.with_name(args.report.stem + "_rows.jsonl").write_text(
         "\n".join(json.dumps(r, ensure_ascii=False) for r in rows_t) + "\n", encoding="utf-8")
-    write_report(args, cfg, ck, bg, st, su, time.time() - t0)
+    write_report(args, cfg, ck, bg, st, su, so, time.time() - t0)
     print(json.dumps({"trained": st, "untrained": su}, ensure_ascii=False, indent=1))
     return 0
 
 
-def write_report(args, cfg, ck, bg, st, su, secs):
+def write_report(args, cfg, ck, bg, st, su, so, secs):
     f = lambda p: f"{p[0]}/{p[1]} ({100 * p[0] / max(1, p[1]):.0f}%)"
     # 학습 기록은 체크포인트 안의 것을 우선 쓴다(다른 실행의 train_log.jsonl 과 섞이지 않게)
     log = ck.get("train_log") or [json.loads(x) for x in
@@ -170,16 +220,22 @@ def write_report(args, cfg, ck, bg, st, su, secs):
         f"| z 만 바꿨을 때 주 주파수 표준편차(Hz) | {st['within_std_hz']:.2f} | {su['within_std_hz']:.2f} | 다양성 |",
         f"| 마스크 밖 바뀐 값 개수(최대) | {st['outside_changed_max']} | {su['outside_changed_max']} | 국소성(0이어야 함) |",
         f"| 마스크 안 평균 추가 빛(cd/m²) | {st['mean_light_cd']:.1f} | {su['mean_light_cd']:.1f} | |", "",
+        "### 자연스러움 (코드 지표만 — 사람이 보고 평가하지 않음)", "",
+        "| 지표 | 학습한 G | 학습 안 한 G | 오라클(같은 바탕·마스크) | 뜻 |", "|---|---|---|---|---|",
+        f"| 질감 보존율 | {st['texture_ratio']:.3f} | {su['texture_ratio']:.3f} | {so['texture_ratio']:.3f} | 1 = 원본 윤곽선 그대로 |",
+        f"| 빛 공간 변이계수 | {st['light_cv']:.3f} | {su['light_cv']:.3f} | 0 (균일) | 0 보다 크면 빛이 공간적으로 퍼짐 |",
+        f"| (참고) 오라클 hazard 조건 → 위험 | | | {so['hazard'][0]}/{so['hazard'][1]} | 같은 마스크에서의 기준선 |", "",
         "## 학습 기록 (처음 → 마지막)", "",
         f"- 소프트 전이 수: 위험 목표 {first['soft_count_hazard']} → {last['soft_count_hazard']}, "
         f"근처 목표 {first['soft_count_near']} → {last['soft_count_near']} (목표: 위험 ≥ 8, 근처 2~5)",
         f"- 판정 손실 {first['judge']} → {last['judge']}, D 손실 {first['loss_d']} → {last['loss_d']}", "",
         "## 해석 시 주의", "",
         "- 노트북 CPU 동작 확인용 짧은 학습이다. 수치는 이 설정에서의 실측값이며 일반화된 성능 주장이 아니다.",
-        "- 자연스러움은 D 손실 외에 정량 지표가 없다(사람 평가·분포 거리 미측정).",
+        "- 자연스러움은 코드 지표(질감 보존율, 빛 공간 변이계수)로만 잰다. 위험 자극이라 사람이 보고 평가하지 않는다. 실제 영상과의 분포 거리는 아직 없다.",
         "- 정답 라벨은 목표가 아니라 하드 판정 결과다. 목표와 다른 샘플도 판정 결과대로 라벨이 붙는다.",
     ]
-    (ROOT / "checks" / "gan" / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
