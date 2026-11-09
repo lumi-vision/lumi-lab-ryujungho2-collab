@@ -7,6 +7,7 @@ LUMI 프로젝트 개인 실험 저장소입니다. 2026-11-08에 처음부터 �
 
 - **작업 설계 (지금 진행 중)**: [PLAN.md](PLAN.md). 휘도·적색·줄무늬 위험 영상을 의도대로 합성할 수 있는지, 우리 판정기와 팀원 판별기로 전·후 검사합니다.
 - 판정 기준: [docs/CRITERIA.md](docs/CRITERIA.md) · 계산법: [docs/BASICS.md](docs/BASICS.md)
+- **판정 기준 근거 보고서 (수식·출처 등급)**: [docs/STANDARDS.md](docs/STANDARDS.md)
 - **실패와 정정 기록**: [docs/LESSONS.md](docs/LESSONS.md) (논문·발표용, 출처 등급 정의 포함)
 
 ### 2026-11-09 추가: 규칙 명세 · 오라클 · GAN
