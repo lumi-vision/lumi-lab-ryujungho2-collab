@@ -649,6 +649,7 @@ def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None =
 
     돌려주는 값
     - stripe_area     프레임별 줄무늬 픽셀 면적 비율
+    - stripes         프레임별 줄무늬 픽셀 (T×H×W bool) — analyze_all 이 흐름 줄무늬를 휘도 판정에서 뺄 때 씀
     - motion          프레임별 움직임 분류 'static' | 'reversing' | 'drifting' (줄무늬 없으면 '') (⑥)
     - time_ratio      프레임별 시간 변화 에너지 비율 (정지 판정 근거)
     - direction_index 프레임별 방향 지수 DI (흐름 판정 근거)
@@ -707,6 +708,7 @@ def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None =
     hazard_mask = stripes[hazard_frames].any(axis=0) if hazard_frames.any() else np.zeros(lum.shape[1:], bool)
     return {
         "stripe_area": area,
+        "stripes": stripes,
         "motion": motion,
         "time_ratio": time_ratio,
         "direction_index": direction_index,
@@ -724,12 +726,24 @@ def analyze_all(frames_bgr: np.ndarray, fps: float) -> dict:
     """휘도 깜빡임(analyze)·적색 깜빡임(analyze_red)·줄무늬(analyze_pattern)를 함께 판정. 위험 = 하나라도 위험.
 
     hazard_frames·hazard_mask 는 세 판정의 합집합. 휘도와 픽셀 전이는 한 번만 계산한다.
+
+    흐름 줄무늬 제외 (2026-11-10 결정 A): 줄무늬 판정이 '흐름(drifting)'으로 분류한 프레임의 줄무늬 픽셀에서
+    생긴 휘도 전이는 휘도 깜빡임으로 세지 않는다. 한 방향으로 흐르는 줄무늬는 각 픽셀이 주기적으로 밝아졌다
+    어두워져 휘도 깜빡임 조건을 넘을 수 있지만, 표준은 줄무늬 규칙에서 이를 제외한다
+    ("obviously flow smoothly across, into, or out of the screen in one direction", ITC 2001 → Ofcom → ITU-R BT.1702-3
+    Att.1). Harding FPA 도 흐름·카메라 이동을 제외한다(벤더 매뉴얼). 실험 근거: Binnie 1985 흐름 PPR 0~0.04.
+    analyze()(휘도만)는 줄무늬를 모르므로 이 제외가 없다 — 줄무늬가 있을 수 있는 영상은 analyze_all 로 판정한다.
     """
     lum = luminance_cd(frames_bgr)
     signed = pixel_transitions(lum)
-    flash = analyze(frames_bgr, fps, lum=lum, signed=signed)
-    red = analyze_red(frames_bgr, fps)
     pattern = analyze_pattern(frames_bgr, fps, lum=lum, signed=signed)
+    drift = (pattern["motion"] == "drifting")
+    if drift.any():
+        signed = signed.copy()
+        signed[drift] = np.where(pattern["stripes"][drift], 0, signed[drift])
+    flash = analyze(frames_bgr, fps, lum=lum, signed=signed)
+    flash["drift_exempt_frames"] = int(drift.sum())
+    red = analyze_red(frames_bgr, fps)
     return {
         "flash": flash,
         "red": red,

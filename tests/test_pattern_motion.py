@@ -117,3 +117,30 @@ def test_area_accuracy_within_1_point(area, period):
     r = measure.analyze_pattern(stripes(motion="static", area=area, period=period, n=3), FPS)
     intended = round(W * area) / W
     assert intended <= r["peak_stripe_area"] <= intended + 0.01, (area, period, r["peak_stripe_area"])
+
+
+# ---- 결정 A (2026-11-10): 흐름 줄무늬는 휘도 깜빡임에서도 제외 -----------------------------------
+def test_drift_stripes_flash_alone_is_dangerous_but_analyze_all_exempts():
+    v = stripes(area=0.55, motion="drift")
+    assert measure.analyze(v, FPS)["dangerous"] is True          # 휘도만 보면 위험 (각 픽셀이 주기적으로 깜빡임)
+    r = measure.analyze_all(v, FPS)
+    assert r["pattern"]["dangerous"] is False                    # 줄무늬: 흐름 제외
+    assert r["flash"]["dangerous"] is False                      # 휘도: 흐름 줄무늬 영역 제외
+    assert r["flash"]["drift_exempt_frames"] > 0
+    assert r["dangerous"] is False
+
+
+def test_reversing_stripes_still_dangerous_in_analyze_all():
+    r = measure.analyze_all(stripes(area=0.30, motion="reverse"), FPS)
+    assert r["pattern"]["dangerous"] is True and r["dangerous"] is True
+
+
+def test_flash_outside_drift_region_still_counts():
+    """흐름 줄무늬(왼쪽 30%) + 오른쪽 40% 휘도 깜빡임 5 Hz → 휘도 위험은 그대로 잡혀야 함."""
+    v = stripes(area=0.30, motion="drift")
+    t = np.arange(len(v)) / FPS
+    on = (t * 5 * 2).astype(int) % 2 == 1
+    v[on, :, 96:] = 220
+    v[~on, :, 96:] = 40
+    r = measure.analyze_all(v, FPS)
+    assert r["flash"]["dangerous"] is True
