@@ -183,6 +183,18 @@ def analyze(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
         lum = luminance_cd(frames_bgr)
     if signed is None:
         signed = pixel_transitions(lum)
+    out = flash_from_transitions(signed, fps)
+    out["mean_cd"] = lum.mean(axis=(1, 2))
+    return out
+
+
+def flash_from_transitions(signed: np.ndarray, fps: float) -> dict:
+    """③·④ 공통: 픽셀 전이 s[t,p](+1/-1/0) → 화면 전이·1초 창·위험·정답.
+
+    휘도 깜빡임(analyze)과 적색 깜빡임(analyze_red)이 같은 면적·횟수 규칙을 쓰므로 이 함수를 함께 쓴다
+    (ITU-R BT.1702-3: 적색도 "a transition to or from a saturated red is also potentially harmful",
+     면적 > 25%, 1초에 > 3번은 같은 문단의 규칙).
+    """
     c = concurrency_frames(fps)
     a_up, a_dn = directional_areas(signed, c)
     e = screen_transitions(a_up, a_dn, signed)
@@ -194,7 +206,7 @@ def analyze(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
     for s in hazardous_starts:
         hazard_frames[s:s + w] = True
     # '어디': 위험 창 안의 화면 전이 프레임에서, 그 방향으로 (동시성 창 c 안에서) 전이한 픽셀
-    hazard_mask = np.zeros(lum.shape[1:], dtype=bool)
+    hazard_mask = np.zeros(signed.shape[1:], dtype=bool)
     for t in np.flatnonzero((e != 0) & hazard_frames):
         lo = max(0, t - c + 1)
         hazard_mask |= (signed[lo:t + 1] == e[t]).any(axis=0)
@@ -202,7 +214,6 @@ def analyze(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
     area = np.maximum(a_up, a_dn)
     flashes = float(counts.max()) / 2.0
     return {
-        "mean_cd": lum.mean(axis=(1, 2)),
         "area": area,
         "area_up": a_up,
         "area_down": a_dn,
@@ -214,6 +225,120 @@ def analyze(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
         "hazard_frames": hazard_frames,
         "hazard_mask": hazard_mask,
     }
+
+
+# =============================================================================================
+# 적색 깜빡임 판정 — WCAG 2.2 (ISO 9241-391 인용) 의 적색 정의 + ITU-R BT.1702-3 의 면적·횟수 규칙
+# 근거와 출처 등급: docs/STANDARDS.md §2
+#
+#   ⓡ① 상태      선형 RGB 로 포화 빨강 여부  s = R/(R+G+B) ≥ 0.8              (원문 WCAG 2.2, 선형값 — pse 색표로 검산)
+#                 색도  X,Y,Z (sRGB D65 행렬) → u′ = 4X/(X+15Y+3Z), v′ = 9Y/(X+15Y+3Z)  (원문 WCAG 2.2 Understanding)
+#                 검정(R+G+B = 0)은 포화 빨강 아님, 색도는 D65 백색점 (0.1978, 0.4683)  (구현 선택: W3C 이슈 #4285 미해결)
+#   ⓡ② 적색 전이  픽셀마다 바로 앞 프레임의 상태와 비교해
+#                 Δu′v′ > 0.2 이고, 기준이 빨강이 아니고 지금이 포화 빨강이면 +1(빨강으로),
+#                 기준이 포화 빨강이고 지금이 아니면 −1(빨강에서). 방향이 바뀔 때만 1번.   (원문: "one transition is either
+#                 to or from a state with a value R/(R + G + B) that is greater than or equal to 0.8, and the difference
+#                 between states is more than 0.2". 바로 앞 상태와 비교하므로 여러 프레임에 걸쳐 서서히 바뀌는
+#                 색은 세지 않음 — pse-test-media 설계와 같은 해석. 2026-11-10 이전에는 '직전 전이 때의 상태'와
+#                 비교해 s014_multi 를 과잉 검출했음)
+#                 빨강 ↔ 빨강(둘 다 포화)은 세지 않음 (구현 선택: 방향을 정할 수 없음)
+#   ⓡ③ 이후      휘도와 같은 ③ 방향별 동시 면적 > 25%, ④ 1초에 화면 전이 ≥ 7번이면 위험  (원문 ITU-R BT.1702-3)
+#   경계:         Δu′v′ 는 '초과'(WCAG 2.2 "more than 0.2"). trace24 는 '이상'(≥ 0.2) — pse 시험 패턴(0.195/0.205)은 둘 다 같은 결과
+# =============================================================================================
+RED_SAT_RATIO = 0.8                 # 포화 빨강: 선형 R/(R+G+B) 이상(≥)
+RED_DELTA_UV = 0.2                  # 색 차이: Δu′v′ 초과(>)
+D65_UV = (0.1978, 0.4683)           # 검정의 색도로 쓰는 D65 백색점
+RED_CHANGE_EPS = 0.02               # 이보다 작은 색도 변화는 '상태 변화'로 보지 않음 (깜빡임 쌍 짓기용) — 구현 선택
+_XYZ = np.array([[0.4124564, 0.3575761, 0.1804375],
+                 [0.2126729, 0.7151522, 0.0721750],
+                 [0.0193339, 0.1191920, 0.9503041]], dtype=np.float64)
+
+
+def red_state(frames_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """ⓡ① (…×3 uint8 BGR) → (포화 빨강 bool, u′, v′)."""
+    c = frames_bgr.astype(np.float32) / 255.0
+    lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4).astype(np.float64)
+    b, g, r = lin[..., 0], lin[..., 1], lin[..., 2]
+    total = r + g + b
+    sat = (total > 0) & (r >= RED_SAT_RATIO * total)
+    x = _XYZ[0, 0] * r + _XYZ[0, 1] * g + _XYZ[0, 2] * b
+    y = _XYZ[1, 0] * r + _XYZ[1, 1] * g + _XYZ[1, 2] * b
+    z = _XYZ[2, 0] * r + _XYZ[2, 1] * g + _XYZ[2, 2] * b
+    d = x + 15.0 * y + 3.0 * z
+    ok = d > 0
+    u = np.where(ok, 4.0 * x / np.where(ok, d, 1.0), D65_UV[0])
+    v = np.where(ok, 9.0 * y / np.where(ok, d, 1.0), D65_UV[1])
+    return sat, u.astype(np.float32), v.astype(np.float32)
+
+
+def red_transitions(frames_bgr: np.ndarray) -> tuple[np.ndarray, float, np.ndarray]:
+    """ⓡ② 영상(T×H×W×3) → (적색 전이 s[t,p] ∈ {−1,0,+1}, 전이가 일어난 곳의 최대 Δu′v′, 프레임별 포화 빨강 면적).
+
+    비교 기준은 '바로 앞 프레임의 상태'다 (WCAG "the difference between states"). 메모리를 아끼려고 색 상태를
+    프레임마다 계산한다(1080p 에서 전체를 한꺼번에 float64 로 바꾸면 수 GB).
+    2026-11-10: 처음에는 '마지막 적색 전이 때의 상태'와 비교했는데, pse-test-media s014_multi(청록 → 포화 빨강에
+    못 미치는 빨강 → 포화 빨강, 마지막 변화 Δ0.001)를 청록과 비교해 전이로 세는 과잉 검출이 났다. pse 설계와
+    WCAG 문구 모두 '상태 사이의 차이'라서 바로 앞 상태와 비교하도록 바꿨다.
+    한계: 여러 프레임에 걸쳐 서서히 바뀌는 색(한 프레임 변화 ≤ 0.2)은 세지 않는다.
+    """
+    t_len = len(frames_bgr)
+    prev_s, prev_u, prev_v = red_state(frames_bgr[0])
+    sat_area = np.zeros(t_len)
+    sat_area[0] = prev_s.mean()
+    shape = prev_s.shape
+    event = np.zeros((t_len,) + shape, dtype=bool)      # 색 상태가 바뀐 프레임 (Δu′v′ ≥ RED_CHANGE_EPS)
+    qual = np.zeros((t_len,) + shape, dtype=np.int8)    # 그 변화가 적색 전이 조건을 넘으면 방향(+1/−1), 아니면 0
+    duv_at = np.zeros((t_len,) + shape, dtype=np.float32)
+    for t in range(1, t_len):
+        s, u, v = red_state(frames_bgr[t])
+        sat_area[t] = s.mean()
+        duv = np.hypot(u - prev_u, v - prev_v)
+        new_dir = np.where(s & ~prev_s, 1, np.where(~s & prev_s, -1, 0)).astype(np.int8)
+        event[t] = (duv >= RED_CHANGE_EPS) | (new_dir != 0)
+        qual[t] = np.where((duv > RED_DELTA_UV) & (new_dir != 0), new_dir, 0)
+        duv_at[t] = duv
+        prev_s, prev_u, prev_v = s, u, v
+
+    # 깜빡임 = 반대 방향 변화 한 쌍. 픽셀마다 변화를 시간 순서로 (1,2), (3,4), … 짝짓고,
+    # 두 변화가 모두 조건을 넘고 방향이 반대인 쌍만 센다. 짝이 없는 마지막 변화는 조건을 넘으면 센다.
+    k = np.cumsum(event, axis=0, dtype=np.int32)          # 변화 번호 (1부터)
+    t_idx = np.broadcast_to(np.arange(t_len, dtype=np.int32).reshape((t_len,) + (1,) * len(shape)), (t_len,) + shape)
+    ev_t = np.where(event, t_idx, -1)
+    prev_ev = np.maximum.accumulate(ev_t, axis=0)          # t 까지(포함) 마지막 변화 프레임
+    prev_ev = np.concatenate([np.full((1,) + shape, -1, np.int32), prev_ev[:-1]])   # t 이전 마지막 변화
+    ev_t_rev = np.where(event, t_idx, t_len)[::-1]
+    next_ev = np.minimum.accumulate(ev_t_rev, axis=0)[::-1]
+    next_ev = np.concatenate([next_ev[1:], np.full((1,) + shape, t_len, np.int32)])  # t 이후 첫 변화
+    q_pad = np.concatenate([qual, np.zeros((1,) + shape, np.int8)])
+    first_of_pair = (k % 2 == 1)
+    partner = np.where(first_of_pair, next_ev, prev_ev)
+    partner_q = _gather_time(q_pad, partner)
+    unpaired_last = first_of_pair & (next_ev >= t_len)
+    valid = event & (qual != 0) & (((partner_q == -qual) & (partner >= 0)) | unpaired_last)
+    out = np.where(valid, qual, 0).astype(np.int8)
+    max_duv = float(duv_at[valid].max()) if valid.any() else 0.0
+    return out, max_duv, sat_area
+
+
+def _gather_time(arr: np.ndarray, idx: np.ndarray) -> np.ndarray:
+    """arr[(idx[t,p]), p] — 시간축 인덱스로 값 모으기 (범위 밖 인덱스는 마지막 칸 0)."""
+    t_len = arr.shape[0] - 1
+    i = np.where((idx >= 0) & (idx <= t_len), idx, t_len).astype(np.int64)
+    return np.take_along_axis(arr, i, axis=0)
+
+
+def analyze_red(frames_bgr: np.ndarray, fps: float) -> dict:
+    """적색 깜빡임 판정. 돌려주는 값은 analyze() 와 같은 꼴 + 아래 두 값.
+
+    - sat_area   프레임별 포화 빨강 픽셀 면적 비율
+    - max_delta_uv 적색 전이가 일어난 픽셀의 최대 Δu′v′ (전이가 없으면 0)
+    """
+    _check_input(frames_bgr, fps)
+    signed, max_duv, sat_area = red_transitions(frames_bgr)
+    out = flash_from_transitions(signed, fps)
+    out["sat_area"] = sat_area
+    out["max_delta_uv"] = max_duv
+    return out
 
 
 # =============================================================================================
@@ -596,20 +721,22 @@ def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None =
 
 
 def analyze_all(frames_bgr: np.ndarray, fps: float) -> dict:
-    """깜빡임(analyze)과 줄무늬(analyze_pattern)를 함께 판정. 위험 = 둘 중 하나라도 위험.
+    """휘도 깜빡임(analyze)·적색 깜빡임(analyze_red)·줄무늬(analyze_pattern)를 함께 판정. 위험 = 하나라도 위험.
 
-    hazard_frames·hazard_mask 는 두 판정의 합집합. 휘도와 픽셀 전이는 한 번만 계산한다.
+    hazard_frames·hazard_mask 는 세 판정의 합집합. 휘도와 픽셀 전이는 한 번만 계산한다.
     """
     lum = luminance_cd(frames_bgr)
     signed = pixel_transitions(lum)
     flash = analyze(frames_bgr, fps, lum=lum, signed=signed)
+    red = analyze_red(frames_bgr, fps)
     pattern = analyze_pattern(frames_bgr, fps, lum=lum, signed=signed)
     return {
         "flash": flash,
+        "red": red,
         "pattern": pattern,
-        "dangerous": bool(flash["dangerous"] or pattern["dangerous"]),
-        "hazard_frames": flash["hazard_frames"] | pattern["hazard_frames"],
-        "hazard_mask": flash["hazard_mask"] | pattern["hazard_mask"],
+        "dangerous": bool(flash["dangerous"] or red["dangerous"] or pattern["dangerous"]),
+        "hazard_frames": flash["hazard_frames"] | red["hazard_frames"] | pattern["hazard_frames"],
+        "hazard_mask": flash["hazard_mask"] | red["hazard_mask"] | pattern["hazard_mask"],
     }
 
 
