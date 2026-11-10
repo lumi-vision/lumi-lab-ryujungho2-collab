@@ -212,6 +212,28 @@ def test_bt601_full_range_yuvj_stays_on_opencv(tmp_path):
     assert abs(int(next(iter_frames_bgr(p))[10, 10, 1]) - 200) <= 1
 
 
+def test_bt709_decode_changes_luminance_verdict(tmp_path):
+    """판정까지 확인: 검정 ↔ 빨강(190,0,0) 초당 4번 교대(BT.709 표시, 64×36 — 파일은 tmp, 수치로만).
+    올바른 디코드는 ΔL ≈ 21 cd/m² 로 위험, cv2(BT.601) 디코드는 ≈ 17.5 로 20 미만이라 안전 → 위험을 놓친다."""
+    w, h, n = 64, 36, 48
+
+    def ycc(rgb):
+        r, g, b = (np.array(rgb, float) / 255).tolist()
+        y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        Y, U, V = (round(16 + 219 * y), round(128 + 224 * (b - y) / 1.8556), round(128 + 224 * (r - y) / 1.5748))
+        return (np.full((h, w), Y, np.uint8), np.full((h // 2, w // 2), U, np.uint8), np.full((h // 2, w // 2), V, np.uint8))
+    black, red = ycc([0, 0, 0]), ycc([190, 0, 0])
+    p = _h264(tmp_path / "flash709.mp4", w, h, [red if (i // 3) % 2 else black for i in range(n)], matrix="bt709")
+    old = np.stack(list(iter_frames_bgr(p, route="opencv")))
+    new = np.stack(list(iter_frames_bgr(p)))
+    from lumi_synth import measure
+    l_old = float(measure.luminance_cd(old[3:4])[0, 18, 32])
+    l_new = float(measure.luminance_cd(new[3:4])[0, 18, 32])
+    assert l_old < 20.0 <= l_new
+    assert not measure.analyze(old, 24.0)["dangerous"]
+    assert measure.analyze(new, 24.0)["dangerous"]
+
+
 def test_iter_frames_count_and_end(tmp_path):
     p = _h264(tmp_path / "short.mp4", 32, 32, _solid(32, 32, 5), matrix="bt709")
     assert len(list(iter_frames_bgr(p))) == 5

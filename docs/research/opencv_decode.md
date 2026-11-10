@@ -2,7 +2,80 @@
 
 작성 2026-11-10 (노트북). 재현: `.venv\Scripts\python.exe scripts/decode_colorspace_probe.py` (PyAV 필요).
 환경: opencv-python 4.14.0 (FFmpeg 백엔드: avcodec 61.19, swscale 8.3), PyAV 19.0.2.
-모든 실험 영상은 정지 화면이다(깜빡임 없음).
+실험 영상은 정지 화면이다. 단, §0-4의 판정 확인용 영상만 깜빡임 영상이다. 이 영상은 임시 폴더에서 수치로만 판정하고 지웠다.
+
+## 0. 한눈에 보는 정리: OpenCV는 어떻게 RGB를 만들고, 왜 601과 709 차이가 문제인가
+
+### 0-1. 영상 파일 안의 픽셀은 RGB가 아니다
+압축 영상(H.264 등)은 픽셀을 **Y(밝기) · Cb · Cr(색차)**로 저장한다. 색차는 가로·세로를 절반으로 줄여(4:2:0) 용량을 아낀다.
+RGB에서 Y를 만드는 가중치는 표준마다 다르다.
+
+| 표준 | 쓰는 곳 | Y = |
+|---|---|---|
+| BT.601 | SD(480/576줄) | 0.299 R + 0.587 G + 0.114 B |
+| BT.709 | HD(720/1080줄) | 0.2126 R + 0.7152 G + 0.0722 B |
+
+또 Y·Cb·Cr의 값 범위도 두 가지다. **limited**(Y 16~235, 방송·일반 영상)와 **full**(0~255, 휴대폰·JPEG 계열)이다.
+영상 파일에는 어느 행렬과 범위로 저장했는지 **표시(메타데이터)**가 붙는다. 되돌릴 때는 저장할 때와 같은 공식을 써야 원래 RGB가 나온다.
+
+### 0-2. OpenCV가 RGB를 만드는 과정 (소스 코드로 확인)
+
+```
+cv2.VideoCapture(path).read()
+ ① FFmpeg 디먹서·디코더(avcodec) → 프레임: Y·Cb·Cr 평면 (예: yuv420p), 표시(colorspace, color_range)도 함께 나옴
+ ② libswscale 로 BGR24 변환 (SWS_BICUBIC) ← 여기서 행렬·범위를 정함
+      - OpenCV 는 행렬·범위를 지정하지 않는다
+      - 그래서 swscale 기본값: 행렬 = SWS_CS_DEFAULT(= ITU601), 범위 = limited
+        (픽셀 형식 이름이 yuvj* 일 때만 handle_jpeg 가 full 로 바꿈)
+ ③ BGR uint8 (0~255, 감마가 걸린 값) 을 numpy 배열로 돌려줌
+```
+
+근거 (원문 확인):
+- OpenCV `modules/videoio/src/cap_ffmpeg_impl.hpp`(4.x)
+  - 변환 대상은 `AV_PIX_FMT_BGR24`이고 `"sws_flags", SWS_BICUBIC`를 쓴다. 변환 호출은 `sws_scale_frame`(이전 버전 경로는 `sws_getCachedContext` + `sws_scale`)이다.
+  - 파일 전체에 `sws_setColorspaceDetails`, `AVCOL_`, `SWS_CS_`가 **0건**이다. `colorspace`와 `color_range`는 디버그 로그에서만 쓴다.
+  - 같은 파일의 하드웨어 프레임 경로 주석: "sws_scale_frame() applies BT.601 limited range whatever the stream signals"
+- FFmpeg `libswscale/swscale.h`: `#define SWS_CS_DEFAULT 5`, `#define SWS_CS_ITU601 5`
+- FFmpeg `libswscale/utils.c`
+  - 기본 계수는 `sws_setColorspaceDetails(sws, ff_yuv2rgb_coeffs[SWS_CS_DEFAULT], sws->src_range, …)`로 정한다.
+  - 범위는 `sws->src_range |= handle_jpeg(&sws->src_format)`로 정하고, `handle_jpeg`는 `AV_PIX_FMT_YUVJ420P` 등일 때만 1(full)을 돌려준다.
+- 실험(§1)으로도 같은 동작을 확인했다. BT.709 표시 영상도 BT.601 값이 나오고, full 표시 영상도 yuvj가 아니면 limited로 펼쳐진다.
+
+그다음 우리 판정기가 이 BGR을 받아 밝기를 잰다(`measure.luminance_cd`).
+```
+BGR/255 → sRGB 감마 풀기(선형화) → 0.2126 R + 0.7152 G + 0.0722 B → × 200 cd/m²
+```
+여기서도 0.2126/0.7152/0.0722를 쓰지만, 이것은 **선형 RGB로 실제 밝기를 재는 sRGB 표준 계수**다. ②의 '저장된 Y·Cb·Cr을 RGB로 되돌리는 행렬'과는 다른 단계다. ②에서 RGB가 틀어지면 이 단계의 공식이 맞아도 결과가 틀린다.
+
+### 0-3. 그래서 무엇이 문제인가
+- **SD 영상(BT.601로 저장):** 저장 공식과 되돌리는 공식이 같아서 문제가 없다. 노트북 원본 두 개(BBB 640, Elephants Dream)가 여기에 해당한다.
+- **HD 영상(BT.709로 저장):** OpenCV가 BT.601로 되돌리므로 RGB가 틀어진다.
+  - 회색은 오차가 0이다(Cb = Cr = 0이면 행렬과 무관).
+  - 색이 진할수록 많이 틀어진다. 순적색은 42.6이어야 할 밝기가 34.7 cd/m²가 된다. RGB 격자 기준 최대 +39 / −15 cd/m²다.
+  - 색 좌표 u′v′는 최대 0.023 움직인다.
+- **full range 영상(휴대폰 촬영본 등):** 픽셀 형식이 yuvj가 아니면 limited로 펼쳐져 어두운 쪽과 밝은 쪽이 잘린다.
+
+### 0-4. 판정까지 확인 (2026-11-10, `tests/test_decode_color.py::test_bt709_decode_changes_luminance_verdict`)
+검정 ↔ 빨강(190, 0, 0)이 초당 4번 바뀌는 화면 전체 깜빡임을 BT.709로 저장하고, 두 방법으로 읽어 같은 판정기로 판정했다.
+
+| 읽는 방법 | 빨강이 읽힌 값 | 밝기 | 휘도 판정 |
+|---|---|---|---|
+| OpenCV (BT.601로 되돌림) | RGB 172, 0, 1 | 17.5 cd/m² | **안전** (ΔL < 20이라 깜빡임으로 세지 않음) |
+| 표시대로 (BT.709, 새 경로) | RGB 188, 0, 0 | 21.4 cd/m² | **위험** (초당 4번, 면적 100%) |
+
+→ OpenCV로 읽으면 **위험한 영상을 안전하다고 판정**한다. 오라클 라벨이라면 위험 샘플이 안전으로 잘못 붙는 것이고, GAN의 판정 목표도 틀어진다.
+
+적색 판정에서도 확인을 시도했다. 계산상 '포화 빨강(R/(R+G+B) ≥ 0.8)' 여부가 행렬에 따라 갈리는 색(R 140~255, G = B 30~110)을 실제 H.264로 만들어 판정했다.
+- 판정이 뒤집힌 경우는 **0건**이었다.
+- 압축 과정의 반올림 때문에 실제 값이 경계를 벗어났다. 그리고 검정과 비교하면 Δu′v′가 커서 0.2 경계와 멀다.
+- 이 범위 밖(두 색 사이의 Δu′v′가 0.2에 가까운 쌍 등)에서는 뒤집힐 수 있다. 확인하지 않았다.
+
+### 0-5. 어떻게 했나 (요약, 자세히는 §3)
+- 영상을 열 때 PyAV로 표시를 읽어 **영상 단위로** 경로를 고른다.
+  - OpenCV가 맞게 읽는 영상(RGB, 또는 BT.601 + OpenCV와 같은 범위)은 **그대로 OpenCV**를 쓴다. 이미 검증한 결과가 비트 단위로 같다.
+  - 나머지는 **PyAV에 행렬과 범위를 명시**해서 변환한다.
+- 표시가 없으면 mpv와 libplacebo 규칙을 따른다(가로 ≥ 1280 또는 세로 > 576이면 BT.709). HDR은 거부한다.
+- 위 판정 사례를 회귀 테스트로 고정했다. 새 경로에서는 위험, OpenCV 경로에서는 안전으로 나와야 통과한다.
 
 ## 결론 먼저
 
@@ -76,7 +149,7 @@ limited 해석 이론값은 0, 0, 56, 130, 255, 255다(64만 1 차이, 반올림
   - 같은 pts가 둘 이상이거나 pts가 없으면 처음부터 센다. 이동한 뒤 첫 프레임의 pts가 목표와 정확히 같지 않을 때도 처음부터 센다.
 - **기록:** 오라클 manifest의 각 샘플에 `decode`(pix_fmt, matrix, color_range, 추정 여부, 전달 특성, 경로)를 남긴다. `make_oracle_dataset.py`는 사전 검사 때 원본마다 디코드 정보를 출력한다.
 - **확인:**
-  - `tests/test_decode_color.py` 13개를 추가했다. 코드 리뷰를 두 번 받았고, 지적한 HIGH 1건과 MEDIUM 4건을 반영했다.
+  - `tests/test_decode_color.py` 14개를 추가했다(마지막 1개는 §0-4의 판정 확인). 코드 리뷰를 두 번 받았고, 지적한 HIGH 1건과 MEDIUM 4건을 반영했다.
     - BT.709 표시 영상이 BT.709 이론값으로 읽히는지, cv2로 읽으면 BT.601 값이 나와 문제가 재현되는지
     - full range 표시가 유지되는지
     - BT.601 SD 영상은 cv2 경로이고 결과가 비트 단위로 같은지
@@ -86,7 +159,7 @@ limited 해석 이론값은 0, 0, 56, 130, 255, 255다(64만 1 차이, 반올림
     - HDR(PQ) 영상을 거부하는지
     - BT.601 full range(yuvj)는 cv2 경로에 남는지
     - 앞 3프레임이 편집 목록으로 잘린 MP4에서 이동이 정확한지. 수정을 빼면 실패하는 것도 확인했다.
-  - 전체 테스트: 81 passed, 4 skipped(이전과 같은 pse-test-media 없음).
+  - 전체 테스트: 82 passed, 4 skipped(이전과 같은 pse-test-media 없음).
   - 노트북 원본 두 개는 cv2 경로로 정해지고, `read_clip` 결과가 이전과 비트 단위로 같다.
 - **남은 것:**
   - 집 PC에서 BBB 1080p의 표시를 확인하고(`scripts/decode_colorspace_probe.py`), 1080p 트랙 결과(시연 9개 등)를 다시 계산해야 한다. BT.709라면 PyAV 경로로 바뀌어 값이 달라진다.
