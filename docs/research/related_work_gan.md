@@ -13,13 +13,15 @@
      - 기존 문서는 Banda 2018 학위논문 §4.2.8을 근거로 "Barbu의 Forward cGAN은 오라클 결과를 목표로 학습했다"고 정리했다. 그리고 미분 가능 판정기를 목표로 바꾼 E2를 우리 쪽 전환으로 서술했다.
      - 그런데 **논문 본문 §3.1.2는 "미분 가능한 연산으로 만든 광과민 탐지기를 GAN 손실에 선형 결합한다"고 쓴다.**
      - 따라서 "판정기를 손실로 쓰는 GAN" 자체를 LUMI의 새로움으로 주장하면 안 된다.
-     - 논문(구상)과 학위논문(실제 구현)이 다른지는 Banda 2018 원문으로 확인해야 한다. → 확인 필요
+     - **Banda 2018 원문 확인 결과(아래 §F):** 학위논문의 Forward cGAN은 수작업 생성기 출력을 목표로 학습했다(기존 문서가 맞음). 미분 가능 판정기는 **Inverse(보정) 모델의 손실로만** 쓰였다. 논문 §3.1.2의 서술은 학위논문의 구현과 다르다.
    - 같은 점: 지식 기반 생성기가 깨끗한 영상에 위험 기준 **위와 아래** 자극을 넣는다. 미분 가능한 연산으로 만든 광과민 탐지기를 GAN의 손실(perceptual loss)로 쓴다.
    - 다른 점:
      - **목적:** Barbu는 위험 영상을 안전하게 바꾸는 완화(inverse) 변환을 학습한다. LUMI는 검출기를 학습·평가할 데이터를 만든다.
      - **판정 규칙:** Barbu의 탐지기는 "Harding과 비슷한 탐지기를 미분 가능한 연산으로 만든 CNN"이라고만 적혀 있고, 어떤 표준의 어떤 조항을 구현했는지 나오지 않는다. LUMI는 BT.1702-3을 조항별로 구현했다.
      - **생성 공간:** LUMI는 linear RGB에서 빛만 더하는 1채널 Δ로 생성 공간을 제한한다.
-2. **공개된 위험 섬광 영상 데이터셋은 사실상 없다.** FlashGuard (2025)도 "공개 저장소가 없다"고 명시한다. 유일한 공개 후보는 South et al. (2021)의 OSF GIF 폴더다.
+2. **제대로 된 공개 위험 섬광 영상 데이터셋은 사실상 없다.** FlashGuard (2025)도 "공개 저장소가 없다"고 명시한다. 공개 후보는 둘이다.
+   - South et al. (2021)의 OSF GIF 폴더
+   - Kaya et al. (2025)의 `PSE_triggering_dataset.rar`: 공개 URL이지만 라이선스가 명시되지 않았고, 약 18~22개 규모에, 라벨은 PEAT 판정으로 추정된다. 자세한 내용은 [kaya_dataset.md](kaya_dataset.md).
 3. **동료심사를 거친 딥러닝 PSE 검출기와 공개 벤치마크는 찾지 못했다.** 검출 쪽은 규칙 기반 도구(Harding FPA, PEAT, IRIS, Carreira 2015)가 중심이다.
 4. **GAN이 오라클의 평균으로 붕괴한 현상(LESSONS A1)은 새로운 발견이 아니다.** pix2pix와 Mathieu 2016이 보고한 평균화 및 noise 무시 현상의 사례로 설명하고, DSGAN·MSGAN과 비교 실험으로 뒷받침하는 편이 안전하다.
 5. **soft judge의 방법론적 선례는 STL robustness를 미분 가능하게 만든 연구들이다**(STLCG, Smooth Operator, 규칙으로 유도하는 diffusion). "1초에 3회 초과"는 시간 논리 형태의 조건이다.
@@ -86,6 +88,31 @@
 - Nomura (1999). A comfortable brain-interface to video displays. *Neural Networks* 12(2):347–354. 10 Hz 이상 성분을 줄이는 적응형 필터다. 서지는 Crossref로 확인했고, 내용은 2차다.
 - Nomura et al. (2000). *Psychiatry Clin. Neurosci.* 54:685–690. 환자 11명 대상 필터 효과를 보고한다. 2차.
 
+## F. Banda 2018 학위논문 (Barbu 2020의 구현) — 원문 확인
+
+- 서지: D. Banda (2018), MIT M.Eng. thesis, DSpace@MIT 1721.1/121622. 79쪽 PDF를 받아 텍스트로 추출했다.
+- 아래 인용 중 ★ 표시는 노트북에서 추출본으로 직접 다시 확인한 것이다.
+
+| 질문 | 원문 | 위치 |
+|---|---|---|
+| Forward GAN 학습 목표 | ★ "The input to the generator is the video V_i, and the parameters used to generate its synthesized counterpart **(which is the target of the model)** are fed into Z." 입력에 노이즈를 직접 넣지 않고, Z에서 Z̃를 샘플링하며 KL 정규화를 한다. **손실 구성(L1, 적대적 손실, 판정기 손실)은 적혀 있지 않다.** | §4.2.8 p.45 |
+| "very deterministic" | ★ "We observed that for video with low intensity flashing the network would amplify the flashing intensity and frequency. Like in [77], our trained model was **very deterministic**." 원인 설명은 없고 pix2pix([77])와 비교만 한다. | §4.2.8 p.45 |
+| 미분 가능 판정기 | ★ "we engineered parts of the hand detector to use **differentiable tensor ops** … one to detect luminance flashes and another to detect saturated reds." 휘도는 0.299/0.587/0.114(BT.601 루마, W3C 계수 아님)를 쓰고, ReLU(\|∇x_l\| − 20)를 30프레임 창에서 센다. **25% 면적 조건은 없다.** "20"은 화소값 차이이고 cd/m²가 아니다. | §4.2.7 p.42–44 |
+| 판정기가 쓰인 곳 | **Inverse 모델의 손실에만** 쓰였다: L_total = α·L_mse + β·L_d + γ·L_vgg + ζ·L_lum (식 4.7). ★ "including this loss led to networks quickly learning to **blur out flashing regions**." 표 6.1에는 ζ > 0인 모델이 없다. | p.44, p.57 |
+| 판정기만으로 학습할 때의 문제 | ★ "the generator would simply learn to **fool the oracle with low luminance images or garbage**." | p.42 |
+| 학습형 탐지기 | CNN-LSTM, 합성 데이터에 BCE로 학습, 라벨은 "t = 1 if the input video contains a flash". Inverse 모델에서 사전학습된 고정 판별기로 쓰였다. | §4.1.2–4.1.3 p.31, p.42 |
+| 수작업 생성기 | 지속 1–3초. 저주파 1–3 Hz(위험 아님 샘플 역할)와 고주파 15–25 Hz. 유형은 적·청, 흑·백, HSV, 파장 이동 4가지. **면적 파라미터는 없고 프레임 전체에 섞는다.** | §3.2.1–3.2.2 p.25–27 |
+| Forward GAN 평가 | 사람 평가만 있다(수정본 선택 비율: 수작업 91%, GAN 83%). 판정기로 한 정량 평가는 없다. | 그림 6-2 p.60 |
+| 내부 불일치 | 그림 4-8 캡션과 본문의 Z 정의가 다르다. 3장(20,000 클립, 200×200 이상)과 5장(수백만 링크, 64×64)의 데이터 규모가 다르다. | p.50, p.25, p.53 |
+
+**LUMI에 대한 함의**
+1. `RESEARCH_NARRATIVE.md` §2·§3의 서술("Forward cGAN은 오라클 결과를 목표로 학습, 매우 결정적")은 **학위논문 기준으로 맞다.**
+   - 다만 "오라클"이라는 말을 학위논문은 두 가지 뜻으로 쓴다. 서론에서는 수작업 생성기, §4.2.7에서는 미분 가능 판정기다. 그러니 '수작업 생성기 출력을 목표로'라고 써야 오해가 없다.
+2. **"판정기를 생성기 손실로 쓴다"는 아이디어는 Barbu 2020 논문 §3.1.2에 이미 적혀 있다.** 하지만 학위논문에서는 Forward GAN에 구현되지 않았다. Inverse에서는 흐리게 만드는 지름길이 생겨서 거의 쓰이지 않았다.
+   - 그러므로 LUMI E2의 의미는 이렇게 쓸 수 있다. "구상으로만 제시된 방식을 **BT.1702-3 조항별 판정(25% 면적 포함, cd/m² 단위)**으로 실제 구현하고, 붕괴와 지름길(흐림, 어둡게 만들기)을 측정했다."
+   - "처음 제안했다"고 쓰면 안 된다.
+3. Banda의 "판정기만 쓰면 어둡거나 엉망인 영상으로 속인다"는 관찰은 우리 LESSONS A6(규칙 빈틈 공략)과 같은 현상이다. 그대로 인용할 수 있다.
+
 ---
 
 ## 찾지 못했거나 확인하지 못한 것
@@ -104,6 +131,6 @@
   - "규칙 기반 생성기 + 미분 가능 판정기 GAN"이 처음이라는 주장. Barbu 2020이 이미 했다.
   - "평균 붕괴의 발견". pix2pix와 Mathieu 2016이 이미 보고했다.
 - **다음에 할 것:**
-  - Banda 2018 학위논문(DSpace@MIT 1721.1/121622)에서 Forward GAN이 실제로 오라클 목표만 썼는지, 미분 가능 탐지기 손실도 구현했는지 확인한다. 결과에 따라 RESEARCH_NARRATIVE §2·§3의 서술을 고친다.
+  - ~~Banda 2018 확인~~ → 완료(§F). RESEARCH_NARRATIVE §2에 "판정기 손실은 Barbu 논문에 구상으로 있으나 학위논문 Forward에는 미구현"이라는 한 줄을 추가할지 결정한다.
   - Barbu §3.1.2의 탐지기 구조(섬광 판정을 어떤 연산으로 미분 가능하게 했는지)와 LUMI soft judge를 표로 비교한다. 현재 PDF 본문에 세부가 부족해서 보충자료를 확인해야 한다.
   - DSGAN·MSGAN과 비교 실험을 설계한다.
