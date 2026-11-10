@@ -153,6 +153,23 @@ def impact():
         return (s > 0) & (lin[:, 0] >= 0.8 * s)
     print(f"  포화 적색(선형 R/(R+G+B) ≥ 0.8) 판정이 바뀌는 색: {int((sat(linr) != sat(linw)).sum())}/{len(rgb)}")
 
+    # 색도 u′v′ (measure.red_state 와 같은 정의: sRGB D65 XYZ 행렬)
+    def uv(lin):
+        m = np.array([[0.4124564, 0.3575761, 0.1804375], [0.2126729, 0.7151522, 0.0721750],
+                      [0.0193339, 0.1191920, 0.9503041]])
+        x, y, z = (lin @ m.T).T
+        d = x + 15 * y + 3 * z
+        ok = d > 0
+        return (np.where(ok, 4 * x / np.where(ok, d, 1), 0.1978), np.where(ok, 9 * y / np.where(ok, d, 1), 0.4683))
+    (ur, vr), (uw, vw) = uv(linr), uv(linw)
+    shift = np.hypot(ur - uw, vr - vw)
+    print(f"  같은 색의 u′v′ 위치 이동: 최대 {shift.max():.4f}, 평균 {shift.mean():.4f}")
+    rng = np.random.default_rng(0)
+    a, b = rng.integers(0, len(rgb), (2, 4000))
+    dr, dw = np.hypot(ur[a] - ur[b], vr[a] - vr[b]), np.hypot(uw[a] - uw[b], vw[a] - vw[b])
+    print(f"  무작위 색 쌍 4000개 중 'Δu′v′ > 0.2' 판정이 바뀌는 쌍: {int(((dr > 0.2) != (dw > 0.2)).sum())}, "
+          f"쌍 Δu′v′ 차이 최대 {np.abs(dr - dw).max():.4f}")
+
 
 def sources():
     print("== 4) data/ 아래 영상 메타데이터 ==")

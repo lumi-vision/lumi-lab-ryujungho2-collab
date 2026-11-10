@@ -1,5 +1,7 @@
 numpy>=2.3
 opencv-python>=4.12
+# 영상 색 표시(행렬·range)대로 디코드 — cv2 는 BT.709·full range 표시를 무시함 (docs/research/opencv_decode.md). 19.0.2 로 검증
+av>=19
 matplotlib>=3.10
 pytest>=8
 # 이 저장소의 src/lumi_synth 를 .venv에 연결 설치 (코드를 고치면 바로 반영됨)

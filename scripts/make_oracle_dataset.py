@@ -34,7 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from lumi_synth import measure, oracle
-from lumi_synth.data import ClipSpec, content_box, file_sha256, save_sample, scan_clean_clips
+from lumi_synth.data import ClipSpec, content_box, decode_info, file_sha256, save_sample, scan_clean_clips
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = {   # 경로는 --raw(기본 data/) 기준
@@ -95,6 +95,10 @@ def main() -> int:
         if box[2:] != (spec.width, spec.height):
             print(f"[알림] {split} 원본 {sw}×{sh} 는 16:9 가 아니라 여백이 들어갑니다(영상 영역 {box[2]}×{box[3]}). "
                   "오라클 마스크가 여백에도 놓일 수 있습니다.")
+        di = decode_info(src)                               # 색 행렬·range 표시 (cv2 는 표시를 무시하므로 확인)
+        guessed = "" if di.matrix_tagged else " (표시 없음 → 해상도 규칙으로 추정)"
+        print(f"[디코드] {split} 원본 {src.name}: {di.pix_fmt}, 행렬 {di.matrix}{guessed}, range {di.color_range} "
+              f"→ {'PyAV(표시대로 변환)' if di.route == 'pyav' else 'OpenCV'} 로 읽음")
     t0 = time.time()
     for split, (fname, s0, s1) in SOURCES.items():
         src = args.raw / fname
@@ -117,7 +121,7 @@ def main() -> int:
                 if reason:
                     fail_reasons[(intent, reason)] += 1
                 meta = {"split": split, "source": c["source"], "start_frame": c["start_frame"],
-                        "fps": spec.fps, "width": spec.width, "height": spec.height, "track": spec.tag, "background_check": c["check"], "params": r["params"],
+                        "fps": spec.fps, "width": spec.width, "height": spec.height, "track": spec.tag, "background_check": c["check"], "decode": c["decode"], "params": r["params"],
                         "label_dangerous": r["judge"]["dangerous"],
                         "max_flashes": r["judge"]["max_flashes"], "peak_area": r["judge"]["peak_area"],
                         "mask_area": float(r["mask_allow"].mean()), "changed_area": float(r["mask_changed"].mean()),

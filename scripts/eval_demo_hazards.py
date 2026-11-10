@@ -21,6 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from lumi_synth import measure  # noqa: E402
+from lumi_synth.data import iter_frames_bgr  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO = ROOT / "data/hazard_demo"
@@ -28,15 +29,8 @@ CHECKS = ROOT / "checks/demo_hazards"
 
 
 def read_all(path: Path) -> np.ndarray:
-    cap = cv2.VideoCapture(str(path))
-    frames = []
-    while True:
-        ok, f = cap.read()
-        if not ok:
-            break
-        frames.append(f)
-    cap.release()
-    return np.stack(frames)
+    # 디코드는 영상의 색 행렬·range 표시대로 (2026-11-10, data.iter_frames_bgr)
+    return np.stack(list(iter_frames_bgr(path)))
 
 
 def ours(frames: np.ndarray, fps: float) -> dict:

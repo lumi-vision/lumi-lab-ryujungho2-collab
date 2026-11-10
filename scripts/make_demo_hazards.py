@@ -19,6 +19,7 @@ import cv2
 import numpy as np
 
 from lumi_synth import measure
+from lumi_synth.data import iter_frames_bgr
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "data/sources/big_buck_bunny_1080p/big_buck_bunny_1080p_h264.mov"
@@ -41,15 +42,11 @@ def lin_to_srgb(lin):
 def background() -> np.ndarray:
     cap = cv2.VideoCapture(str(SRC))
     src_fps = cap.get(cv2.CAP_PROP_FPS)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, int(round(START_SEC * src_fps)))
-    need = int(np.ceil(N * src_fps / FPS)) + 1
-    frames = []
-    for _ in range(need):
-        ok, f = cap.read()
-        if not ok:
-            break
-        frames.append(cv2.resize(f, (W, H), interpolation=cv2.INTER_AREA))
     cap.release()
+    need = int(np.ceil(N * src_fps / FPS)) + 1
+    # 디코드는 영상의 색 행렬·range 표시대로 (2026-11-10, data.iter_frames_bgr — cv2 는 BT.709 를 BT.601 로 읽음)
+    frames = [cv2.resize(f, (W, H), interpolation=cv2.INTER_AREA)
+              for f in iter_frames_bgr(SRC, int(round(START_SEC * src_fps)), need)]
     idx = [int(i * src_fps / FPS) for i in range(N)]       # 24 → 30 fps: 4장마다 1장 복제
     return np.stack([frames[i] for i in idx])
 
