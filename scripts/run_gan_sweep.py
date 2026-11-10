@@ -31,6 +31,7 @@ def main() -> int:
     ap.add_argument("--seeds", default="0,1,2")
     ap.add_argument("--divs", default="0.05,0.5")
     ap.add_argument("--tag", default="u")
+    ap.add_argument("--fp32", action="store_true", help="bf16 를 끄고 fp32 로 학습(bf16 영향 분리용, 약 2배 느림)")
     ap.add_argument("--eval-threads", type=int, default=6, help="평가 하나가 쓰는 CPU 스레드")
     ap.add_argument("--max-evals", type=int, default=2, help="동시에 돌릴 평가 수")
     args = ap.parse_args()
@@ -57,10 +58,12 @@ def main() -> int:
         ck = ROOT / "data" / "gan" / f"{name}.pt"
         report = ROOT / "checks" / "gan" / f"{name}.md"
         if not ck.exists():
-            cmd = [PY, "-u", str(ROOT / "scripts" / "train_gan.py"), "--device", "cuda", "--amp", "--grad-ckpt",
+            cmd = [PY, "-u", str(ROOT / "scripts" / "train_gan.py"), "--device", "cuda", "--grad-ckpt",
                    "--steps", str(args.steps), "--batch-size", str(args.batch_size), "--micro-batch", str(args.micro_batch),
                    "--width", str(args.width), "--lambda-div", str(d), "--seed", str(s),
                    "--checkpoint", str(ck), "--log", str(ROOT / "checks" / "gan" / f"train_log_{name}.jsonl")]
+            if not args.fp32:
+                cmd.append("--amp")
             print(f"[학습 시작] {name} ({(time.time() - t0) / 60:.1f}분 경과)", flush=True)
             with open(logs / f"train_{name}.log", "w", encoding="utf-8") as f:
                 rc = subprocess.call(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=ROOT)
