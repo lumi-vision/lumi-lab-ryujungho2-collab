@@ -50,6 +50,8 @@ curl -LRO https://download.blender.org/durian/movies/Sintel.2010.1080p.mkv
 curl -LRO https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov
 ```
 
+- 2026-11-10: Sintel 1080p를 다시 받아 `data/raw/sintel/`에 두었습니다. SHA256이 위 값과 같습니다. 768×432 오라클 데이터셋의 **시험 분할**(학습 영화 BBB와 다른 영화)로 60~700초 구간을 씁니다. 화면비가 16:9가 아니라 위아래 여백이 들어갑니다.
+
 ### 1-1. 실제로 쓰는 원본: Big Buck Bunny 1080p (2026-11-08)
 
 공간 패턴(pse-test-media)이 1920×1080이라 같은 해상도의 원본을 씁니다. `scripts/step0_check.py`가 파일이 없으면 자동으로 받습니다.

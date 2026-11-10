@@ -103,6 +103,12 @@ def main() -> None:
     ap.add_argument("--device", default="cpu", choices=("cpu", "cuda"))
     ap.add_argument("--scale", type=float, default=1.0,
                     help="학습 해상도 배율. 판정 해상도 = 학습 해상도 원칙이라 1.0 만 허용(그 외는 --debug-scale)")
+    ap.add_argument("--amp", action="store_true",
+                    help="GPU 효율: G·D 합성곱만 bf16 (판정기·sRGB·다양성 손실은 fp32). 빛 Δ 수치 오차 약 0.2 cd/m² 수준")
+    ap.add_argument("--grad-ckpt", action="store_true",
+                    help="GPU 메모리: G 와 소프트 판정기를 그래디언트 체크포인팅(역전파 때 다시 계산, 결과 동일)")
+    ap.add_argument("--micro-batch", type=int, default=0,
+                    help="GPU 메모리: 배치를 이 크기로 나눠 그래디언트 누적(0 = 나누지 않음). GroupNorm 은 샘플별이라 결과 동일")
     ap.add_argument("--debug-scale", action="store_true",
                     help="배율 ≠ 1.0 을 동작 확인용으로만 허용. 결과는 학습용 데이터에 쓸 수 없다(check_track 이 막음)")
     args = ap.parse_args()
@@ -118,6 +124,26 @@ def main() -> None:
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
         raise SystemExit("CUDA 를 요청했지만 사용할 수 없습니다.")
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        # Windows 는 GPU 메모리가 넘치면 시스템 RAM 으로 흘려 수십 배 느려진다(2026-11-10 측정) → 넘치면 바로 오류로 멈춘다
+        torch.cuda.set_per_process_memory_fraction(0.95)
+    mb = args.micro_batch or args.batch_size
+    if args.batch_size % mb:
+        raise SystemExit("--batch-size 는 --micro-batch 의 배수여야 합니다.")
+    amp = torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp and device.type == "cuda")
+    from torch.utils.checkpoint import checkpoint
+
+    def run_g(clean_, mask_, target_, z_):
+        if args.grad_ckpt:
+            return checkpoint(G, clean_, mask_, target_, z_, use_reentrant=False)
+        return G(clean_, mask_, target_, z_)
+
+    def run_judge(out_, target_):
+        f = lambda o: judge_loss(luminance_rel(srgb_to_linear(o.float())), target_, fps)
+        if args.grad_ckpt:
+            return checkpoint(f, out_, use_reentrant=False)
+        return f(out_)
     npz = np.load(args.data / "backgrounds_train.npz")
     bg = npz["clips"]                                                   # (N,T,H,W,3) uint8 BGR
     if bg.ndim != 5 or len(bg) == 0:
@@ -144,26 +170,44 @@ def main() -> None:
         target = torch.from_numpy((np.arange(b) % 2 == 0).astype(np.float32)).to(device)        # 위험/근처 절반씩
         z1, z2 = torch.randn(b, args.zdim, device=device), torch.randn(b, args.zdim, device=device)
 
-        # ---- 2. D: 진짜(깨끗한 바탕 프레임) 대 가짜(G 출력 프레임)
-        with torch.no_grad():
-            fake, _ = G(clean, mask, target, z1)
+        # ---- 2. D: 진짜(깨끗한 바탕 프레임) 대 가짜(G 출력 프레임) — 마이크로배치로 나눠 누적(평균은 같음)
         real = to_tensor(bg[rng.integers(0, n, b)], device)
         opt_d.zero_grad(set_to_none=True)
-        loss_d = F.relu(1 - D(random_frames(real, 4))).mean() + F.relu(1 + D(random_frames(fake, 4))).mean()
-        loss_d.backward()
+        loss_d_sum = 0.0
+        for i in range(0, b, mb):
+            sl = slice(i, i + mb)
+            with torch.no_grad(), amp:
+                fake, _ = G(clean[sl], mask[sl], target[sl], z1[sl])
+            with amp:
+                loss_d = (F.relu(1 - D(random_frames(real[sl], 4))).mean()
+                          + F.relu(1 + D(random_frames(fake.float(), 4))).mean())
+            (loss_d.float() * (mb / b)).backward()
+            loss_d_sum += float(loss_d) * mb / b
         opt_d.step()
+        loss_d = torch.tensor(loss_d_sum)
 
         # ---- 3. G: 판정 목표 + 자연스러움 + 리듬 다양성
         opt_g.zero_grad(set_to_none=True)
-        out1, d1 = G(clean, mask, target, z1)
-        out2, d2 = G(clean, mask, target, z2)
-        lj1, c1 = judge_loss(luminance_rel(srgb_to_linear(out1)), target, fps)
-        lj2, _ = judge_loss(luminance_rel(srgb_to_linear(out2)), target, fps)
-        adv = -D(random_frames(out1, 4)).mean()
-        div = spectral_diversity(d1, d2, mask, z1, z2)
-        loss_g = args.lambda_judge * (lj1 + lj2) / 2 + args.lambda_adv * adv + args.lambda_div * div
-        loss_g.backward()
+        lj_sum, adv_sum, div_sum, counts = 0.0, 0.0, 0.0, []
+        for i in range(0, b, mb):
+            sl = slice(i, i + mb)
+            with amp:
+                out1, d1 = run_g(clean[sl], mask[sl], target[sl], z1[sl])
+                out2, d2 = run_g(clean[sl], mask[sl], target[sl], z2[sl])
+                adv = -D(random_frames(out1, 4)).mean().float()
+            lj1, c1 = run_judge(out1, target[sl])
+            lj2, _ = run_judge(out2, target[sl])
+            div = spectral_diversity(d1.float(), d2.float(), mask[sl], z1[sl], z2[sl])
+            loss_g = args.lambda_judge * (lj1 + lj2) / 2 + args.lambda_adv * adv + args.lambda_div * div
+            (loss_g * (mb / b)).backward()
+            lj_sum += float((lj1 + lj2) / 2) * mb / b
+            adv_sum += float(adv) * mb / b
+            div_sum += float(div) * mb / b
+            counts.append(c1.detach())
         opt_g.step()
+        c1 = torch.cat(counts)
+        lj1 = lj2 = torch.tensor(lj_sum)
+        adv, div = torch.tensor(adv_sum), torch.tensor(div_sum)
 
         if step == 1 or step % 25 == 0 or step == args.steps:
             haz = target > 0.5
@@ -172,6 +216,8 @@ def main() -> None:
                    "soft_count_hazard": round(float(c1[haz].mean().detach()), 2),
                    "soft_count_near": round(float(c1[~haz].mean()), 2),
                    "elapsed_s": round(time.perf_counter() - start, 1)}
+            if device.type == "cuda":
+                rec["gpu_peak_GB"] = round(torch.cuda.max_memory_allocated() / 1e9, 2)
             print(json.dumps(rec, ensure_ascii=False), flush=True)
             with args.log.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
