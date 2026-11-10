@@ -2,6 +2,29 @@
 
 # 집 PC(RTX 5080)에서 할 일 — 2026-11-09 노트북 작업 이후
 
+## ★ 먼저: 위험 3종 생성 스윕 평가 (2026-11-10 노트북에서 코드만 완성, 실행은 집에서)
+
+노트북에서 한 것: 생성기 확장(`oracle.py` 의 `render_flicker`·`render_flat_flash`·`red_pair`·`render_red`·`render_stripes`),
+스윕 생성·평가 스크립트, 생성기 테스트 4개. 회색 바탕 106개는 노트북에서 만들었지만 BBB 1080p 원본이 노트북에 없어
+받다가 메모리 부족으로 멈춤 → 평가·그래프는 아직 없음.
+
+```powershell
+git pull --ff-only
+pip install -r requirements.txt                       # av(PyAV) 포함
+python scripts\step0_check.py                         # BBB 1080p 가 없으면 받고 SHA256 확인 (data/sources/)
+python scripts\make_hazard_sweep.py                   # 회색·BBB 바탕 × 106개 = 212개 (data/hazard_sweep/, 재생 금지)
+python scripts\eval_hazard_sweep.py --only team --team-dir <lumi-lab-rockrovks 경로>   # 팀원 판별기, 수정 없이
+python scripts\eval_hazard_sweep.py --only ours       # 우리 판정기 (클립당 수십 초, 중단돼도 이어서 실행됨)
+python scripts\eval_hazard_sweep.py --only report --team-dir <lumi-lab-rockrovks 경로>
+```
+
+- 결과: `checks/hazard_sweep/README.md`, `results.csv`, 그래프 `fig_sweep_{lum,red,stripe}.png`·`fig_agreement.png`·
+  `fig_measured_vs_design.png`·`fig_timeseries.png` (수치 그래프만, 영상 프레임 그림 없음)
+- 팀원 판별기 버전은 실행 전에 `git -C <경로> log --oneline -1` 로 기록(노트북 확인 시 `e29ba9b`)
+- **합격**: 우리 판정기가 회색 바탕에서 생성 의도와 계열별로 일치. 어긋나면 원인(생성기 / 판정기 / 기대값 계산)을 README 에 기록
+- 다음: 결과를 발표자료(07 다음 장 '생성 3종')에 추가
+- 다루지 않은 줄무늬 정의: 쌍 수(5 또는 6, 면적과 얽힘), 체커보드·동심원, 흐름 줄무늬의 휘도 제외(결정 A)
+
 > 노트북에서 한 일과 결과: [CHANGELOG_2026-11-09.md](CHANGELOG_2026-11-09.md). 전체 흐름: [WORKFLOW.md](WORKFLOW.md).
 > 순서대로 한다. 각 단계의 **합격 기준**을 못 넘으면 다음 단계로 가지 않고 원인을 기록한다.
 

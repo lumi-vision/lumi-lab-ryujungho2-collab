@@ -141,19 +141,24 @@ def make_mask(p: OracleParams, h: int, w: int) -> np.ndarray:
 
 
 # ---- 시간 파형 w(t) ------------------------------------------------------------------------
-def waveform(p: OracleParams, n_frames: int, fps: float) -> np.ndarray:
-    """0~1 사이 켜짐 정도 w(t). 1주기 = 켜짐 1번 + 꺼짐 1번 = 깜빡임 1번."""
-    pos = p.freq_hz * np.arange(n_frames) / fps + p.phase
+def wave(kind: str, freq_hz: float, n_frames: int, fps: float, phase: float = 0.0) -> np.ndarray:
+    """0~1 사이 켜짐 정도 w(t). 1주기 = 켜짐 1번 + 꺼짐 1번 = 깜빡임 1번. kind: square | sine | triangle."""
+    pos = freq_hz * np.arange(n_frames) / fps + phase
     frac = pos - np.floor(pos)
-    if p.waveform == "square":
+    if kind == "square":
         w = (frac < 0.5).astype(np.float32)
-    elif p.waveform == "sine":
+    elif kind == "sine":
         w = 0.5 - 0.5 * np.cos(2 * np.pi * frac)
-    elif p.waveform == "triangle":
+    elif kind == "triangle":
         w = 1.0 - np.abs(2.0 * frac - 1.0)
     else:
-        raise ValueError(f"알 수 없는 파형: {p.waveform}")
+        raise ValueError(f"알 수 없는 파형: {kind}")
     return w.astype(np.float32)
+
+
+def waveform(p: OracleParams, n_frames: int, fps: float) -> np.ndarray:
+    """OracleParams 의 파형·주파수·위상으로 w(t) (wave() 참고)."""
+    return wave(p.waveform, p.freq_hz, n_frames, fps, p.phase)
 
 
 # ---- 합성 -------------------------------------------------------------------------------------
@@ -172,11 +177,7 @@ def synthesize(clean_bgr: np.ndarray, p: OracleParams, fps: float) -> dict:
     t_len, h, w_ = clean_bgr.shape[:3]
     m = make_mask(p, h, w_)
     w = waveform(p, t_len, fps)
-    delta_rel = p.delta_cd / measure.WHITE_CD           # cd/m² → 상대 휘도
-    lin = srgb_to_linear(clean_bgr)
-    add = (w[:, None, None] * delta_rel)[..., None] * m[None, :, :, None]   # T×H×W×1
-    out = linear_to_srgb(lin + add)
-    out = np.where(m[None, :, :, None], out, clean_bgr)  # 마스크 밖은 원본과 비트 단위로 같게
+    out = render_flicker(clean_bgr, m, w, p.delta_cd)
     changed = (out != clean_bgr).any(axis=(0, 3))
     r = measure.analyze(out, fps)
     judge = {k: r[k] for k in ("dangerous", "max_flashes", "peak_area")}
@@ -185,3 +186,161 @@ def synthesize(clean_bgr: np.ndarray, p: OracleParams, fps: float) -> dict:
     expect = p.intent == "hazard"
     return {"flicker": out, "mask_allow": m, "mask_changed": changed, "w": w,
             "judge": judge, "intent_ok": bool(r["dangerous"]) == expect, "params": asdict(p)}
+
+
+# =============================================================================================
+# 생성 계열 확장 (2026-11-10): 휘도 깜빡임 그리기 분리 · 적색 깜빡임 · 줄무늬
+#
+# 위 synthesize() 는 '무작위 조건 → 휘도 깜빡임 → 판정'을 한 번에 한다. 아래 함수들은 그리기만 한다
+# (판정은 부르는 쪽에서: 저장한 파일을 다시 읽어서 잰다 — PLAN §5-3). 조건 하나씩 경계를 가로질러 바꾸는
+# 스윕(scripts/make_hazard_sweep.py)과 이후 GAN 데이터 생성에 쓴다.
+#
+#   휘도  render_flicker    X_lin = min(1, Y_lin + M·w(t)·ΔL/200)          (위 synthesize 와 같은 식)
+#         render_flat_flash 영역을 단색 회색으로 덮고 L_lo ↔ L_hi (cd/m²) 교대 — '어두운 쪽 < 160' 조건 시험용
+#   적색  red_pair          같은 휘도의 두 색 A(빨강, 선형 R/(R+G+B) = ρ) ↔ B(A 와 파랑을 선형으로 섞은 색)
+#                           · 선형 RGB 혼합은 휘도를 보존하므로(가중합) 휘도 깜빡임 없이 색만 바뀐다
+#                           · u′v′ 는 XYZ 의 사영변환이라 선형 혼합이 u′v′ 위 직선 → Δu′v′ 가 혼합비에 단조 → 이분 탐색
+#                           · 상대 휘도 0.06(12 cd/m²): 이 밝기여야 ρ 0.6~0.95 전 범위에서 Δu′v′ 0.33 이상까지
+#                             만들 수 있다(0.15 에서는 청록·초록 쪽 최대 0.13~0.30, 색역 한계 — 2026-11-10 계산)
+#         render_red        영역을 A ↔ B 단색으로 덮음 (pse-test-media 적색 패턴과 같은 방식)
+#   줄무늬 render_stripes   사각파 줄무늬, 방향 θ, 공간 주파수 cpd (56 cm·15인치 기준 measure.pixels_per_degree),
+#                           밝은 줄·어두운 줄 휘도(cd/m²), 움직임 static | reversing(명암 반전 hz) | drifting(°/s)
+#                           · 픽셀마다 4×4 부분 표본으로 밝은 줄이 덮는 비율을 구해 '선형 빛'으로 섞는다
+#                             (화면이 실제로 내는 빛의 면적 평균. 높은 cpd 에서 명암이 줄어드는 것도 그대로 나타남)
+#
+# 줄무늬 정의 중 아직 정하지 않은 것(스윕에서 다루지 않음): 쌍 수(5 또는 6, 면적과 얽힘), 체커보드·동심원 등
+# 다른 모양, 흐름 줄무늬를 휘도 판정에서도 뺄지(결정 A, 재검토 예정).
+# =============================================================================================
+def region_mask(shape: str, area: float, h: int, w: int, center=(0.5, 0.5), aspect: float = 16 / 9,
+                seed: int = 0) -> np.ndarray:
+    """모양·면적만 정한 마스크 (make_mask 와 같은 이분 탐색). aspect = 가로/세로 픽셀 비."""
+    p = OracleParams(intent="hazard", area=float(area), shape=shape, center=tuple(center), aspect=float(aspect),
+                     freq_hz=0.0, waveform="square", phase=0.0, delta_cd=0.0, seed=int(seed))
+    return make_mask(p, h, w)
+
+
+def render_flicker(clean_bgr: np.ndarray, mask: np.ndarray, w: np.ndarray, delta_cd: float) -> np.ndarray:
+    """휘도 깜빡임: 선형 빛 더하기. 마스크 밖은 원본과 비트 단위로 같다."""
+    lin = srgb_to_linear(clean_bgr)
+    add = (w[:, None, None] * (delta_cd / measure.WHITE_CD))[..., None] * mask[None, :, :, None]
+    out = linear_to_srgb(lin + add)
+    return np.where(mask[None, :, :, None], out, clean_bgr)
+
+
+def gray_u8(cd: float) -> int:
+    """휘도 cd/m² 인 회색의 sRGB 8비트 값 (가장 가까운 값)."""
+    return int(linear_to_srgb(np.array([cd / measure.WHITE_CD]))[0])
+
+
+def render_flat_flash(clean_bgr: np.ndarray, mask: np.ndarray, w: np.ndarray, lo_cd: float, hi_cd: float) -> np.ndarray:
+    """영역을 단색 회색으로 덮고 w(t)=0 이면 lo_cd, 1 이면 hi_cd (중간값은 선형 빛으로 보간)."""
+    out = clean_bgr.copy()
+    for t in range(len(out)):
+        out[t][mask] = gray_u8(lo_cd + (hi_cd - lo_cd) * float(w[t]))
+    return out
+
+
+RED_PAIR_Y = 0.06            # 적색 색 쌍의 상대 휘도 (12 cd/m²) — 위 설명 참고
+_BLUE = np.array([0.0, 0.0, 1.0])
+
+
+def _red_measure(rgb_u8) -> tuple[float, float, float, bool]:
+    """(R,G,B) 8비트 → (선형 R/(R+G+B), u′, v′, 포화 빨강 여부) — 판정기(measure.red_state)로 잰다."""
+    bgr = np.array([[[rgb_u8[2], rgb_u8[1], rgb_u8[0]]]], np.uint8)
+    sat, u, v = measure.red_state(bgr)
+    lin = srgb_to_linear(np.array(rgb_u8, np.uint8))
+    return float(lin[0] / max(float(lin.sum()), 1e-12)), float(u[0, 0]), float(v[0, 0]), bool(sat[0, 0])
+
+
+def _lum_cd(rgb_u8) -> float:
+    return float(measure.WHITE_CD * (srgb_to_linear(np.array(rgb_u8, np.uint8)) @ np.array([0.2126, 0.7152, 0.0722])))
+
+
+def red_pair(sat_ratio: float, delta_uv: float, y_rel: float = RED_PAIR_Y) -> dict:
+    """같은 휘도의 적색 색 쌍. A = 선형 (r, g, g) 로 R/(R+G+B) = sat_ratio, B = (1−s)·A + s·파랑(같은 휘도).
+
+    s 를 이분 탐색해 8비트로 양자화한 뒤 판정기로 잰 Δu′v′ 가 delta_uv 에 가장 가깝게 한다.
+    돌려주는 값: a_rgb, b_rgb (8비트 R,G,B), 실제로 잰 ratio_a, ratio_b, sat_a, sat_b, delta_uv, lum_a_cd, lum_b_cd.
+    """
+    g_over_r = (1.0 - sat_ratio) / (2.0 * sat_ratio)
+    r = y_rel / (0.2126 + 0.7874 * g_over_r)
+    a_lin = np.array([r, r * g_over_r, r * g_over_r])
+    blue = _BLUE * (y_rel / 0.0722)
+    if r > 1 or blue.max() > 1:
+        raise ValueError(f"색역 밖: sat_ratio={sat_ratio}, y_rel={y_rel}")
+    a_u8 = tuple(int(c) for c in linear_to_srgb(a_lin))
+    ra, ua, va, sa = _red_measure(a_u8)
+
+    def b_of(s):
+        b_u8 = tuple(int(c) for c in linear_to_srgb((1 - s) * a_lin + s * blue))
+        rb, ub, vb, sb = _red_measure(b_u8)
+        return b_u8, float(np.hypot(ub - ua, vb - va)), rb, sb
+
+    lo, hi = 0.0, 1.0
+    best = None
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        cand = b_of(mid)
+        if best is None or abs(cand[1] - delta_uv) < abs(best[1] - delta_uv):
+            best = cand
+        if cand[1] < delta_uv:
+            lo = mid
+        else:
+            hi = mid
+    b_u8, d, rb, sb = best
+    return {"a_rgb": a_u8, "b_rgb": b_u8, "ratio_a": ra, "ratio_b": rb, "sat_a": sa, "sat_b": sb,
+            "delta_uv": d, "lum_a_cd": _lum_cd(a_u8), "lum_b_cd": _lum_cd(b_u8)}
+
+
+def render_red(clean_bgr: np.ndarray, mask: np.ndarray, w: np.ndarray, a_rgb, b_rgb) -> np.ndarray:
+    """적색 깜빡임: 영역을 단색으로 덮고 w(t) < 0.5 이면 A, ≥ 0.5 이면 B. 마스크 밖은 원본 그대로."""
+    out = clean_bgr.copy()
+    a_bgr, b_bgr = tuple(a_rgb)[::-1], tuple(b_rgb)[::-1]
+    for t in range(len(out)):
+        out[t][mask] = b_bgr if w[t] >= 0.5 else a_bgr
+    return out
+
+
+STRIPE_MOTIONS = ("static", "reversing", "drifting")
+
+
+def stripe_period_px(width: int, height: int, cpd: float, angle_deg: float) -> float:
+    """줄무늬 한 주기(밝은 줄 + 어두운 줄)의 픽셀 길이. angle_deg = 줄에 수직인 방향(0° = 세로 줄)."""
+    return measure.pixels_per_degree(width, height, angle_deg) / cpd
+
+
+def render_stripes(clean_bgr: np.ndarray, mask: np.ndarray, fps: float, cpd: float, angle_deg: float = 0.0,
+                   lo_cd: float = 10.0, hi_cd: float = 110.0, motion: str = "static", hz: float = 5.0,
+                   speed_dps: float = 4.0, sub: int = 4) -> np.ndarray:
+    """사각파 줄무늬로 영역을 덮는다. 마스크 밖은 원본 그대로.
+
+    motion: static(정지) | reversing(hz 로 명암 반전: 반주기마다 밝은 줄 ↔ 어두운 줄) | drifting(speed_dps °/s 로 한 방향 흐름)
+    """
+    if motion not in STRIPE_MOTIONS:
+        raise ValueError(f"motion 은 {STRIPE_MOTIONS} 중 하나: {motion}")
+    t_len, h, w = clean_bgr.shape[:3]
+    period = stripe_period_px(w, h, cpd, angle_deg)
+    ppd = measure.pixels_per_degree(w, h, angle_deg)
+    a = np.radians(angle_deg)
+    off = (np.arange(sub) + 0.5) / sub - 0.5
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    pos = [(xs + ox) * np.cos(a) + (ys + oy) * np.sin(a) for oy in off for ox in off]   # 줄 수직 방향 좌표
+    lo, hi = lo_cd / measure.WHITE_CD, hi_cd / measure.WHITE_CD
+    out = clean_bgr.copy()
+    cache: dict = {}                                       # 정지·반전은 상태가 1~2개뿐이라 한 번만 계산
+    for t in range(t_len):
+        shift = speed_dps * ppd * t / fps if motion == "drifting" else 0.0
+        flip = motion == "reversing" and int(t * hz * 2 / fps) % 2 == 1
+        if (shift, flip) not in cache:
+            cov = np.mean([(((q - shift) / period) % 1.0) < 0.5 for q in pos], axis=0)
+            cache[(shift, flip)] = linear_to_srgb(lo + (hi - lo) * (1.0 - cov if flip else cov))[mask][:, None]
+        out[t][mask] = cache[(shift, flip)]
+    return out
+
+
+def stripe_pairs_in_mask(mask: np.ndarray, period_px: float, angle_deg: float) -> float:
+    """마스크가 줄 수직 방향으로 차지하는 길이 ÷ 주기 = 들어가는 줄 쌍 수 (설계상 기대값 계산용)."""
+    ys, xs = np.nonzero(mask)
+    a = np.radians(angle_deg)
+    q = xs * np.cos(a) + ys * np.sin(a)
+    return float((q.max() - q.min() + 1) / period_px) if len(q) else 0.0
