@@ -32,8 +32,9 @@ _spec = importlib.util.spec_from_file_location("vrp", ROOT / "scripts" / "valida
 vrp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(vrp)
 
-VARIANTS = ["base", "q_strict", "q_lenient", "sync20", "jv24_strict", "jv24_lenient"]
+VARIANTS = ["base", "q_strict", "q_lenient", "q_linear", "q_hold", "sync20", "jv24_strict", "jv24_lenient"]
 LABEL = {"base": "현재 판정기", "q_strict": "+ 전이 시간 66 ms (1프레임)", "q_lenient": "+ 전이 시간 66 ms (2프레임)",
+         "q_linear": "+ 전이 시간 66 ms (연속 시간·선형 보간)", "q_hold": "+ 전이 시간 66 ms (연속 시간·표시 유지)",
          "sync20": "+ 동기화 창 20 ms", "jv24_strict": "3조항 모두 (66 ms = 1프레임)",
          "jv24_lenient": "3조항 모두 (66 ms = 2프레임)"}
 
@@ -52,6 +53,8 @@ def one(job):
         "base": measure.flash_from_transitions(base_s, fps),
         "q_strict": measure.flash_from_transitions(k1, fps),
         "q_lenient": measure.flash_from_transitions(k2, fps),
+        "q_linear": measure.flash_from_transitions(measure.pixel_transitions_continuous(lum, fps, model="linear"), fps),
+        "q_hold": measure.flash_from_transitions(measure.pixel_transitions_continuous(lum, fps, model="hold"), fps),
         "sync20": measure.flash_from_transitions(base_s, fps, c=c20),
         "jv24_strict": measure.flash_from_transitions(k1, fps, c=c20, fast_ms=measure.JV24_FAST_MS),
         "jv24_lenient": measure.flash_from_transitions(k2, fps, c=c20, fast_ms=measure.JV24_FAST_MS),

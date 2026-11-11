@@ -25,6 +25,26 @@ def test_two_step_change_is_one_transition_by_default_but_not_under_strict_66ms(
     assert (measure.pixel_transitions_windowed(lum, 2) != 0).sum() > 0   # lenient: 2프레임(66.7 ms) 안 38.7 → 전이
 
 
+def test_continuous_models_on_two_step_change():
+    # 30 fps: 19.5 + 19.2 하강. 선형 보간이면 20 cd/m² 가 약 34 ms 안에 일어나므로 전이, hold 도 66 ms 안에 두 걸음이 보여 전이
+    lum = lum_video([87.9, 87.9, 68.4, 49.2, 49.2])
+    assert (measure.pixel_transitions_continuous(lum, 30.0, model="linear") != 0).sum() > 0
+    assert (measure.pixel_transitions_continuous(lum, 30.0, model="hold") != 0).sum() > 0
+    # 아주 느린 변화(프레임당 5, 30 fps → 66 ms 에 10 cd/m²)는 어느 모델에서도 전이 아님
+    slow = lum_video([40 + 5 * i for i in range(20)])
+    for m in ("linear", "hold"):
+        assert (measure.pixel_transitions_continuous(slow, 30.0, model=m) != 0).sum() == 0
+
+
+def test_continuous_is_fps_consistent():
+    # 같은 물리 신호(초당 12 cd/m² 의 기울기가 아니라, 25 ms 동안 30 cd/m² 상승)를 다른 fps 로 표본
+    def sample(fps):
+        t = np.arange(int(0.5 * fps)) / fps
+        return lum_video(list(np.clip((t - 0.2) / 0.025, 0, 1) * 30 + 50))
+    for fps in (24.0, 30.0, 60.0, 120.0):
+        assert (measure.pixel_transitions_continuous(sample(fps), fps, model="linear") == 1).sum() > 0
+
+
 def test_fast_change_counts_under_all_modes():
     lum = lum_video([40, 40, 100, 100, 40, 40])
     for k in (1, 2):

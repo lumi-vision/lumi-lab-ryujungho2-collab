@@ -97,6 +97,55 @@ def pixel_transitions_windowed(lum: np.ndarray, k: int) -> np.ndarray:
     return out
 
 
+def pixel_transitions_continuous(lum: np.ndarray, fps: float, ms: float = JV24_QUALIFYING_MS,
+                                 model: str = "linear") -> np.ndarray:
+    """JV24 '단일 전이 허용 시간'을 프레임 수가 아니라 연속 시간(ms)으로 재는 판정 (fps 와 무관하게 66 ms).
+
+    model='linear': 프레임 시각 t/fps 의 휘도 사이를 직선으로 잇는다(프레임 = 표본). 길이 ms 인 어떤 구간 안에서든
+                    한 방향 변화가 ≥ 20 cd/m² 이면 전이. 구간 끝이 프레임 사이에 걸리면 그 점의 휘도를 보간한다.
+    model='hold'  : 각 프레임이 다음 프레임까지 그대로 보인다(실제 화면, sample-and-hold). 길이 ms 인 구간 안에
+                    보이는 프레임끼리 비교 → 최근 floor(ms·fps/1000)+1 프레임과 비교하는 것과 같다.
+    방향 기억(같은 방향 연속 변화는 1번)은 pixel_transitions_windowed 와 같다.
+    """
+    w = ms / 1000.0 * fps                        # 구간 길이(프레임 단위, 실수)
+    if model == "hold":
+        return pixel_transitions_windowed(lum, int(np.floor(w + 1e-9)) + 1)
+    if model != "linear":
+        raise ValueError(f"model 은 'linear' 또는 'hold': {model}")
+    k = int(np.floor(w + 1e-9))                  # 구간 안에 통째로 들어가는 프레임 간격 수
+    f = w - k                                    # 남는 조각(0 ≤ f < 1)
+    lumf = lum.astype(np.float32)
+    t_len = len(lumf)
+    direction = np.zeros(lumf.shape[1:], dtype=np.int8)
+    out = np.zeros(lumf.shape, dtype=np.int8)
+    for t in range(1, t_len):
+        v = lumf[t]
+        # (A) 오른쪽 끝 = 프레임 t, 왼쪽 끝 = 시각 t - w (보간점)
+        pts = [lumf[t - j] for j in range(1, k + 1) if t - j >= 0]
+        if f > 1e-9 and t - k - 1 >= 0:
+            pts.append((1 - f) * lumf[t - k] + f * lumf[t - k - 1])
+        lo_a = np.min(pts, axis=0) if pts else v
+        hi_a = np.max(pts, axis=0) if pts else v
+        up_mag, dn_mag = v - lo_a, hi_a - v
+        up = (up_mag >= DELTA_CD) & (lo_a < DARK_LIMIT_CD)
+        dn = (dn_mag >= DELTA_CD) & (v < DARK_LIMIT_CD)
+        # (B) 왼쪽 끝 = 프레임 t-k-1, 오른쪽 끝 = 시각 t-1+f (프레임 t-1 과 t 사이 보간점)
+        if f > 1e-9 and t - k - 1 >= 0:
+            end = (1 - f) * lumf[t - 1] + f * v
+            past = lumf[t - k - 1:t]
+            lo_b, hi_b = past.min(axis=0), past.max(axis=0)
+            up_b = ((end - lo_b) >= DELTA_CD) & (lo_b < DARK_LIMIT_CD)
+            dn_b = ((hi_b - end) >= DELTA_CD) & (end < DARK_LIMIT_CD)
+            up_mag = np.where(up_b, np.maximum(up_mag, end - lo_b), up_mag)
+            dn_mag = np.where(dn_b, np.maximum(dn_mag, hi_b - end), dn_mag)
+            up, dn = up | up_b, dn | dn_b
+        d = np.where(up & dn, np.where(up_mag >= dn_mag, 1, -1), np.where(up, 1, np.where(dn, -1, 0))).astype(np.int8)
+        trans = (d != 0) & (d != direction)
+        out[t] = np.where(trans, d, 0)
+        direction = np.where(trans, d, direction)
+    return out
+
+
 def merge_fast_flashes(e: np.ndarray, fps: float, ms: float = JV24_FAST_MS) -> np.ndarray:
     """JV24 '빠른 점멸': 한 칸 건너 전이(같은 방향) 간격이 ms 이하인 연속 구간은 처음과 끝 두 전이로만 센다.
 
