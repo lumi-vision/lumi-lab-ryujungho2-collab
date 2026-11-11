@@ -6,3 +6,7 @@ matplotlib>=3.10
 pytest>=8
 # 이 저장소의 src/lumi_synth 를 .venv에 연결 설치 (코드를 고치면 바로 반영됨)
 -e .
+# E-Means 검증 노트북 (notebooks/emeans_verify.ipynb) — faiss 1.16.0 에 E-Means 공식 구현(faiss.contrib.e_means)
+faiss-cpu==1.16.0
+scikit-learn>=1.9
+ipykernel
