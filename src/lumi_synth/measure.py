@@ -45,6 +45,81 @@ def concurrency_frames(fps: float) -> int:
     return max(1, int(round(fps / 15.0)))
 
 
+# ---- 선택: Jordan & Vanderheiden 2024 시간창 조항 (기본은 꺼짐) ------------------------------------
+# 출처: J. B. Jordan, G. C. Vanderheiden, ACM TACCESS 17(3), 2024, doi:10.1145/3694790 와
+#       github.com/traceRERC/pseGuidelines (2024, "Proposed", 값은 "working value") — 원문 확인 2026-11-11
+#   qualifying duration   "The time over which a single transition may take place of 66 ms or less."
+#   sufficiently synchronized "When transitions are in the same direction and occur within 20 ms of each other."
+#   fast flashes          every second transition separated by 15 ms or less → 같은 방향 전이를 합쳐
+#                         "the sequence of fast flashes is counted as two transitions total"
+# 프레임으로 바꾸는 방법은 구현 선택이다. 66 ms 는 30 fps 에서 2프레임(66.7 ms)과 거의 같아 해석이 갈린다:
+#   'strict'  : k/fps ≤ 66 ms 인 프레임 간격 k 만 (30 fps → 1프레임)
+#   'lenient' : k = round(0.066·fps) 프레임까지 (30 fps → 2프레임, 66.7 ms)
+JV24_QUALIFYING_MS = 66.0
+JV24_SYNC_MS = 20.0
+JV24_FAST_MS = 15.0
+
+
+def qualifying_frames(fps: float, mode: str = "strict") -> int:
+    """66 ms 안에 들어가는 최대 프레임 간격 K (≥ 1)."""
+    x = JV24_QUALIFYING_MS / 1000.0 * fps
+    k = int(np.floor(x + 1e-9)) if mode == "strict" else int(round(x))
+    return max(1, k)
+
+
+def sync_frames(fps: float, ms: float = JV24_SYNC_MS) -> int:
+    """'동시'(ms 이내)로 볼 프레임 수 c: 간격 d 프레임이 d/fps ≤ ms 이면 동시. 30 fps → 1(같은 프레임만), 60 fps → 2."""
+    return max(1, int(np.floor(ms / 1000.0 * fps + 1e-9)) + 1)
+
+
+def pixel_transitions_windowed(lum: np.ndarray, k: int) -> np.ndarray:
+    """JV24 '단일 전이 허용 시간': 최근 k 프레임 안에서 |ΔL| ≥ 20 (어두운 쪽 < 160) 인 변화만 전이로 센다.
+
+    pixel_transitions 와 달리 '직전 극값'에서 재지 않는다 → k 프레임보다 길게 걸친 느린 변화는 전이가 아니다.
+    방향 기억(같은 방향 연속 변화는 1번)은 같다.
+      위로: L_t − min(L_{t−k..t−1}) ≥ 20 이고 그 최솟값 < 160
+      아래로: max(L_{t−k..t−1}) − L_t ≥ 20 이고 L_t < 160
+      둘 다면 변화가 큰 쪽.
+    """
+    t_len = len(lum)
+    direction = np.zeros(lum.shape[1:], dtype=np.int8)
+    out = np.zeros(lum.shape, dtype=np.int8)
+    for t in range(1, t_len):
+        past = lum[max(0, t - k):t]
+        lo, hi, v = past.min(axis=0), past.max(axis=0), lum[t]
+        up_mag, dn_mag = v - lo, hi - v
+        up = (up_mag >= DELTA_CD) & (lo < DARK_LIMIT_CD)
+        dn = (dn_mag >= DELTA_CD) & (v < DARK_LIMIT_CD)
+        d = np.where(up & dn, np.where(up_mag >= dn_mag, 1, -1), np.where(up, 1, np.where(dn, -1, 0))).astype(np.int8)
+        trans = (d != 0) & (d != direction)
+        out[t] = np.where(trans, d, 0)
+        direction = np.where(trans, d, direction)
+    return out
+
+
+def merge_fast_flashes(e: np.ndarray, fps: float, ms: float = JV24_FAST_MS) -> np.ndarray:
+    """JV24 '빠른 점멸': 한 칸 건너 전이(같은 방향) 간격이 ms 이하인 연속 구간은 처음과 끝 두 전이로만 센다.
+
+    30 fps 이하에서는 전이 간격이 33 ms 이상이라 바뀌는 것이 없다(고주사율 영상용)."""
+    ev = np.flatnonzero(e)
+    if len(ev) < 3:
+        return e
+    out = e.copy()
+    gap = ms / 1000.0 * fps
+    i = 0
+    while i < len(ev) - 2:
+        j = i
+        while j + 2 < len(ev) and ev[j + 2] - ev[j] <= gap + 1e-9:
+            j += 1
+        if j > i:                          # ev[i] .. ev[j+1] 이 빠른 점멸 구간
+            for m in ev[i + 1:j + 1]:
+                out[m] = 0
+            i = j + 2
+        else:
+            i += 1
+    return out
+
+
 # ---- ① 밝기 ------------------------------------------------------------------------------
 def luminance_cd(frames_bgr: np.ndarray) -> np.ndarray:
     """uint8 BGR 프레임(…×H×W×3)을 픽셀별 물리 휘도 L (cd/m², float32)로 바꾼다.
@@ -161,6 +236,24 @@ def _check_input(frames_bgr: np.ndarray, fps: float) -> None:
         raise ValueError(f"fps는 양수여야 합니다: {fps}")
 
 
+def analyze_jv24(frames_bgr: np.ndarray, fps: float, qualifying: str | None = "strict", sync: bool = True,
+                 fast: bool = True, lum: np.ndarray | None = None) -> dict:
+    """(선택) analyze 에 Jordan & Vanderheiden 2024 시간창 조항을 켠 판정. 기본 판정(analyze)은 바뀌지 않는다.
+
+    qualifying: 'strict' | 'lenient' | None(끔) — 단일 전이 허용 시간 66 ms
+    sync: 영역 동기화 창 20 ms (끄면 기본 D3 창) · fast: 빠른 점멸 병합 15 ms
+    """
+    _check_input(frames_bgr, fps)
+    if lum is None:
+        lum = luminance_cd(frames_bgr)
+    signed = (pixel_transitions_windowed(lum, qualifying_frames(fps, qualifying)) if qualifying
+              else pixel_transitions(lum))
+    out = flash_from_transitions(signed, fps, c=sync_frames(fps) if sync else None,
+                                 fast_ms=JV24_FAST_MS if fast else None)
+    out["mean_cd"] = lum.mean(axis=(1, 2))
+    return out
+
+
 def analyze(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
             signed: np.ndarray | None = None) -> dict:
     """영상(T×H×W×3 uint8 BGR)을 규칙대로 판정한다. 오라클·GAN·데이터셋 라벨이 모두 이 함수를 쓴다.
@@ -188,16 +281,21 @@ def analyze(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None = None,
     return out
 
 
-def flash_from_transitions(signed: np.ndarray, fps: float) -> dict:
+def flash_from_transitions(signed: np.ndarray, fps: float, c: int | None = None,
+                           fast_ms: float | None = None) -> dict:
     """③·④ 공통: 픽셀 전이 s[t,p](+1/-1/0) → 화면 전이·1초 창·위험·정답.
 
     휘도 깜빡임(analyze)과 적색 깜빡임(analyze_red)이 같은 면적·횟수 규칙을 쓰므로 이 함수를 함께 쓴다
     (ITU-R BT.1702-3: 적색도 "a transition to or from a saturated red is also potentially harmful",
      면적 > 25%, 1초에 > 3번은 같은 문단의 규칙).
+    c: 동시성 창(프레임). None 이면 기본 D3(concurrency_frames). fast_ms: 주면 JV24 빠른 점멸 병합.
     """
-    c = concurrency_frames(fps)
+    if c is None:
+        c = concurrency_frames(fps)
     a_up, a_dn = directional_areas(signed, c)
     e = screen_transitions(a_up, a_dn, signed)
+    if fast_ms is not None:
+        e = merge_fast_flashes(e, fps, fast_ms)
     counts = window_counts(e, fps)
     w = max(1, int(round(fps)))
     hazardous_starts = np.flatnonzero(counts >= 2 * MAX_FLASHES_PER_SEC + 1)
