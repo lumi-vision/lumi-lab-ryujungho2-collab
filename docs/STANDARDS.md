@@ -261,3 +261,12 @@ ITU-R BT.1702 -0·-1·-2판에는 패턴 수치가 없고, -3판(2023)에서 처
 | rockrovks "평균 × 1.3"의 출처 | 팀원 판별기와 결과가 다를 때 설명 | 팀원에게 문의 |
 | 15인치 4:3 → 16:9 차이의 영향 | ppd가 바뀌어 cpd 판정이 달라짐 | 두 조건으로 계산해 비교 |
 | 움직임 정량 기준 | 25% / 40% 중 어느 것을 쓸지 결정 | 표준에 없음. 구현 선택으로 두고 민감도(5·10·20%)를 측정해 보고 |
+
+## 6. 결정 기록 (2026-11-12)
+
+| 항목 | 결정 | 근거 | 등급 |
+|---|---|---|---|
+| 면적 25% 의 기준 | **화면 전체 면적의 25%** (시야각 25% 아님) | ITU-R BT.1702-3 "more than 25% of the displayed screen area". 시야 기준(WCAG 0.006 sr, Fisher 2026 '시야 25%')도 근거는 있으나 시야 크기 정의가 없어 수치로 옮기기 어려움 (docs/research/viewing_geometry.md) | 원문 + 결정 |
+| 지속(연장) 플래시 | **ITU-R 방식**: 진폭·면적은 기준 이상, 빈도는 1초 기준 아래(2~3 Hz)인 깜빡임이 오래 지속되면 위험. 숫자는 EA IRIS 구현(1초 전이 4~6, 최근 5초 중 80%)을 따름 | ITU-R BT.1702-3 Annex 1: "a sequence of flashing images lasting more than five seconds might constitute a risk even when it complies with the guidelines above"(주의 문구, 빈도·창 없음) · IRIS d96978a TransitionTracker | ITU 원문(정성) + IRIS 구현 선택 |
+| 지속 플래시 검증 | 우리 `measure.extended_flash`(iris) 와 IRIS 실행 파일이 시험 영상 24개에서 24/24 일치, 실패 시각 동일 | checks/extended/README.md | 실측 |
+| 66 ms 단일 전이 허용 시간 | **보류**: 프레임 규약(pse 205/210) 대 연속 시간(201/210) — 둘 다 옵션 | checks/rules/jv24.md | 제안(JV24 2024) |

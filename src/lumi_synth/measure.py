@@ -285,6 +285,70 @@ def _check_input(frames_bgr: np.ndarray, fps: float) -> None:
         raise ValueError(f"fps는 양수여야 합니다: {fps}")
 
 
+# ---- 지속(연장) 플래시 — 결정(2026-11-12): ITU-R 방식, IRIS 구현으로 구체화 -----------------------------
+# 근거 (원문 확인 2026-11-12)
+#   ITU-R BT.1702-3 Annex 1 Guideline 1: "a sequence of flashing images lasting more than five seconds might constitute
+#     a risk even when it complies with the guidelines above." — 빈도·창·판정 규칙 없음, 주의 문구(규범 아님).
+#   EA IRIS d96978a (src/TransitionTracker.cpp·.h, appsettings.json): 최근 1초 전이 4~6 번(2~3 플래시/초)인 프레임을
+#     세고, 최근 5초 창에서 그런 프레임이 4초(80%) 이상이고 지금 전이가 4 번 이상이면 'extended failure'.
+#     전이가 6 번을 넘으면 일반 플래시 실패가 우선. 전이 자체(면적 25%, 밝기 차)는 일반 판정과 같다.
+#   → 숫자(2~3 Hz, 5초 창의 80%)는 IRIS 의 구현 선택이다. 등급: 'ITU 정성 경고를 IRIS 방식으로 구체화'.
+EXT_MIN_TRANSITIONS = 4      # 1초 전이 4 번 = 2 플래시/초 (IRIS MinTransitions)
+EXT_MAX_TRANSITIONS = 6      # 1초 전이 6 번 = 3 플래시/초 (IRIS MaxTransitions; 7 번부터는 일반 위험)
+EXT_WINDOW_S = 5.0           # IRIS EXTENDED_FAIL_WINDOW
+EXT_FAIL_S = 4.0             # IRIS EXTENDED_FAIL_SECONDS (5초 창의 80%)
+
+
+def extended_flash(e: np.ndarray, fps: float, mode: str = "iris", min_transitions: int = EXT_MIN_TRANSITIONS,
+                   max_transitions: int = EXT_MAX_TRANSITIONS, window_s: float = EXT_WINDOW_S,
+                   fail_s: float = EXT_FAIL_S) -> dict:
+    """화면 전이 e[t](+1/-1/0, analyze·analyze_red 의 'transitions') → 지속 플래시 판정.
+
+    mode='iris'      : IRIS 와 같은 규칙. 프레임 t 의 '최근 1초' 전이 수 c_t (t 포함 round(fps) 프레임).
+                       c_t 가 [min, max] 이면 그 프레임을 센다. 최근 window_s 초 안에 센 프레임이 fail_s·fps 개 이상이고
+                       min ≤ c_t ≤ max 이면 지속 위험.
+    mode='continuous': 센 프레임이 끊기지 않고 window_s 초 '넘게' 이어지면 위험 (ITU 문구 'more than five seconds' 를
+                       글자 그대로 읽은 변형).
+    min_transitions=2 로 주면 1~3 Hz 변형(IRIS 는 2~3 Hz).
+    """
+    w = max(1, int(round(fps)))
+    ev = (np.asarray(e) != 0).astype(np.int32)
+    csum = np.concatenate([[0], np.cumsum(ev)])
+    t_idx = np.arange(len(ev))
+    trailing = csum[t_idx + 1] - csum[np.maximum(0, t_idx + 1 - w)]          # 최근 1초(현재 포함) 전이 수
+    flag = (trailing >= min_transitions) & (trailing <= max_transitions)
+    if mode == "iris":
+        win = max(1, int(round(window_s * fps)))
+        need = int(round(fail_s * fps))
+        fsum = np.concatenate([[0], np.cumsum(flag.astype(np.int32))])
+        recent = fsum[t_idx + 1] - fsum[np.maximum(0, t_idx + 1 - win)]
+        fail = (recent >= need) & flag
+    elif mode == "continuous":
+        # 센 프레임이 이어진 구간마다, 그 구간의 깜빡임이 실제로 이어진 시간 = 첫 전이 ~ 지금까지의 마지막 전이.
+        # (1초 창의 꼬리 때문에 센 프레임 구간은 실제 깜빡임보다 길어지므로 구간 길이로 재지 않는다)
+        fail = np.zeros(len(ev), dtype=bool)
+        events = np.flatnonzero(ev)
+        t = 0
+        while t < len(ev):
+            if not flag[t]:
+                t += 1
+                continue
+            s = t
+            while t < len(ev) and flag[t]:
+                t += 1
+            run_ev = events[(events >= max(0, s - w + 1)) & (events < t)]
+            if len(run_ev):
+                for u in range(s, t):
+                    last = run_ev[run_ev <= u]
+                    if len(last) and (last[-1] - run_ev[0]) / fps > window_s:
+                        fail[u] = True
+    else:
+        raise ValueError(f"mode 는 'iris' 또는 'continuous': {mode}")
+    return {"extended_dangerous": bool(fail.any()), "extended_frames": fail,
+            "trailing_transitions": trailing, "flagged": flag,
+            "first_fail_s": float(np.flatnonzero(fail)[0] / fps) if fail.any() else None}
+
+
 def analyze_jv24(frames_bgr: np.ndarray, fps: float, qualifying: str | None = "strict", sync: bool = True,
                  fast: bool = True, lum: np.ndarray | None = None) -> dict:
     """(선택) analyze 에 Jordan & Vanderheiden 2024 시간창 조항을 켠 판정. 기본 판정(analyze)은 바뀌지 않는다.
