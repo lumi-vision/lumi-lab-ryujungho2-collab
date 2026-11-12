@@ -21,8 +21,14 @@ KAYA_URL = "http://web.cs.hacettepe.edu.tr/~aydinkaya/pse/dataset/PSE_triggering
 
 
 def get_json(url: str) -> dict:
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
-        return json.load(r)
+    for attempt in range(8):                         # OSF API 가 가끔 500 을 낸다
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
+                return json.load(r)
+        except Exception as e:  # noqa: BLE001
+            print(f"  목록 재시도 {attempt + 1}: {e}", flush=True)
+            time.sleep(15 * (attempt + 1))
+    raise RuntimeError(f"목록 받기 실패: {url}")
 
 
 def download(url: str, dest: Path, size: int | None = None) -> None:
@@ -56,13 +62,27 @@ def walk_osf(url: str, rel: Path, files: list) -> None:
 
 
 def south() -> None:
-    files: list = []
-    walk_osf("https://api.osf.io/v2/nodes/5a3dy/files/osfstorage/", Path(), files)
+    dest = OUT / "south2021"
+    dest.mkdir(parents=True, exist_ok=True)
+    cache = dest / "file_list.json"
+    if cache.exists():                               # 이미 받은 목록이 있으면 다시 묻지 않는다
+        files = [(Path(p), u, s) for p, u, s in json.loads(cache.read_text())]
+    else:
+        files = []
+        walk_osf("https://api.osf.io/v2/nodes/5a3dy/files/osfstorage/", Path(), files)
+        cache.write_text(json.dumps([[str(p), u, s] for p, u, s in files], ensure_ascii=False, indent=0))
     total = sum(s or 0 for _, _, s in files)
     print(f"South 2021: 파일 {len(files)}개, {total / 1e9:.2f} GB", flush=True)
-    dest = OUT / "south2021"
-    (dest / "file_list.json").parent.mkdir(parents=True, exist_ok=True)
-    (dest / "file_list.json").write_text(json.dumps([[str(p), u, s] for p, u, s in files], ensure_ascii=False, indent=0))
+    # 라벨 CSV 를 먼저 받고, 위험 라벨(dangerous) 163개 → 나머지 순서로 받는다 (중간에 끊겨도 위험 영상부터 확보)
+    import csv
+    meta = [f for f in files if not str(f[0]).lower().endswith((".gif", ".mp4"))]
+    for rel, url, size in meta:
+        download(url, dest / rel, size)
+    with open(dest / "social-media-study.csv", newline="", encoding="utf-8-sig") as f:
+        danger = {r["label"] for r in csv.DictReader(f) if r["dangerous"] == "dangerous"}
+    media = [f for f in files if f not in meta]
+    files = sorted(media, key=lambda f: Path(f[0]).stem not in danger)       # 위험 먼저 (안정 정렬)
+    print(f"위험 라벨 {sum(Path(f[0]).stem in danger for f in files)}개를 먼저 받음", flush=True)
     failed = []
     for i, (rel, url, size) in enumerate(files, 1):
         try:
