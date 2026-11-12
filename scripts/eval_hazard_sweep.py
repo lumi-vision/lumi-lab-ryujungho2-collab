@@ -313,8 +313,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", choices=["ours", "team", "report", "all"], default="all")
     ap.add_argument("--team-dir", type=Path, default=None)
+    ap.add_argument("--ids", default=None, help="쉼표로 구분한 클립 id 만 평가·보고 (생략하면 전부)")
     args = ap.parse_args()
     meta = json.loads((SWEEP / "manifest.json").read_text(encoding="utf-8"))
+    if args.ids:
+        keep = set(args.ids.split(","))
+        meta["items"] = [it for it in meta["items"] if it["id"] in keep]
     RES.mkdir(parents=True, exist_ok=True)
     if args.only in ("ours", "all"):
         run_ours(meta["items"])
