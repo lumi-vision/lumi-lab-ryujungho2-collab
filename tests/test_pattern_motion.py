@@ -1,4 +1,4 @@
-"""줄무늬 판정: 공간 주파수 1~8 cpd, 움직임 3분류(정지·반전·흐름), 분류별 면적 기준.
+"""줄무늬 판정: 공간 주파수 1~10 cpd, 움직임 3분류(정지·반전·흐름), 분류별 면적 기준.
 
 시험 영상: 160×90, 30 fps, 1초(30프레임). 화면 왼쪽 일부에만 세로 줄무늬(회색 30 ↔ 200,
 2.6 ↔ 115.5 cd/m²), 나머지는 회색 120. 계산을 빠르게 하려고 작은 화면을 쓰고, 시청 거리를 늘려
@@ -97,11 +97,13 @@ def test_drift_not_exempt_when_switched_off(monkeypatch):
     assert r["dangerous"] is True
 
 
-def test_cpd_band_1_to_8():
-    # 주기 8 px ≈ 2.5 cpd (범위 안), 주기 2 px ≈ 10 cpd (1~8 밖 — 예전 1~10 기준이면 안)
-    assert 1.0 <= cpd_of(8) <= 8.0
-    assert cpd_of(2) > 8.0
+def test_cpd_band_1_to_10(monkeypatch):
+    # 주기 8 px ≈ 2.5 cpd (범위 안). 범위 밖은 시청 거리를 300 cm 로 늘려 주기 2 px ≈ 12.6 cpd 로 만든다
+    # (기본 거리에서는 주기 2 px ≈ 9.98 cpd 라 1~10 안 — 2026-11-12 에 상한을 8 → 10 으로 되돌림)
+    assert 1.0 <= cpd_of(8) <= 10.0
     inside = measure.analyze_pattern(stripes(period=8, area=0.55), FPS)
+    monkeypatch.setattr(measure, "VIEW_DISTANCE_CM", 300.0)
+    assert cpd_of(2) > 10.0
     outside = measure.analyze_pattern(stripes(period=2, area=0.55), FPS)
     assert inside["peak_stripe_area"] > 0.40
     # 2026-11-10 측정: 방향별로 상한을 자르던 이전 구현은 56% (비스듬한 스캔이 10 cpd 를 2.6 cpd 로 잼),

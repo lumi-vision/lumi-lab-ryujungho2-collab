@@ -54,3 +54,48 @@ def test_render_stripes_outside_mask_untouched_and_pairs():
     assert (x[:, ~m] == bg[:, ~m]).all()
     period = oracle.stripe_period_px(w, h, 2.0, 0.0)
     assert abs(oracle.stripe_pairs_in_mask(m, period, 0.0) - m.any(axis=0).sum() / period) < 1e-6
+
+
+# ---- 설계상 기대: 팀원 보고서(stage3) 기준과 우리 기준 (scripts/make_hazard_sweep.py) ----------------------
+def _sweep():
+    import importlib
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    return importlib.import_module("make_hazard_sweep")
+
+
+def test_team_flash_count_and_safe_interval():
+    s = _sweep()
+    def lum(hz):
+        return s.expect_lum(0.4, 50.0 * oracle.wave("square", hz, 60, FPS), 0.0)
+    assert lum(3.0)["expected"] is False and lum(3.0)["broken"] == "횟수"      # 같은 방향 간격 333.33 ms ≥ 333.3 ms
+    assert lum(3.5)["expected"] is True
+    assert lum(3.0)["expected_ours"] is False and lum(3.5)["expected_ours"] is True
+    # 66.8 ms(2프레임) 안의 변화가 20 cd/m² 에 못 미치는 느린 변화: 극값 차는 50 이어도 팀원 기준은 '밝기' 미달
+    slow = s.expect_lum(0.4, 50.0 * oracle.wave("sine", 1.0, 60, FPS), 0.0)
+    assert slow["broken"] == "밝기" and "밝기" not in slow["broken_ours"]
+
+
+def test_team_and_our_stripe_expectations_differ_only_on_motion():
+    s = _sweep()
+    static = s.expect_stripe(0.5, 3.0, 10, 110, "static", 60)
+    assert static["expected"] and static["expected_ours"]
+    rev = s.expect_stripe(0.32, 3.0, 10, 110, "reversing", 40)
+    assert rev["expected"] is False and rev["expected_ours"] is True          # 팀원 > 40%, 우리 반전 > 25%
+    drift = s.expect_stripe(0.5, 3.0, 10, 110, "drifting", 60)
+    assert drift["expected"] is True and drift["expected_ours"] is False      # 팀원은 흐름 제외 없음
+    assert s.expect_stripe(0.5, 9.0, 10, 110, "static", 60)["expected_ours"]  # 1~10 cpd 로 되돌림
+    assert not s.expect_stripe(0.5, 10.5, 10, 110, "static", 60)["expected"]
+    five = s.expect_stripe(0.5, 3.0, 10, 110, "static", 5)
+    assert five["expected"] is False and five["expected_ours"] is True        # 팀원 ≥ 6쌍, 우리 ≥ 5쌍
+
+
+def test_team_red_floor_at_470000():
+    s = _sweep()
+    w = oracle.wave("square", 5, 60, FPS)
+    below = s.expect_red(0.4, w, oracle.red_pair_from_colors((70, 0, 0), (0, 0, 0)))
+    above = s.expect_red(0.4, w, oracle.red_pair_from_colors((71, 0, 0), (0, 0, 0)))
+    assert below["expected"] is False and below["expected_ours"] is True
+    assert above["expected"] is True and above["expected_ours"] is True
+    assert oracle.red_pair(0.85, 0.25)["excess_a"] >= 0.0625                  # 기본 적색 쌍은 팀원 하한도 넘음

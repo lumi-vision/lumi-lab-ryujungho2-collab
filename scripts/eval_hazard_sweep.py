@@ -96,6 +96,11 @@ def detected(r: dict | None, typ: str) -> bool | None:
     return bool(r.get(typ, False)) if typ in ("lum", "red", "stripe") else None
 
 
+def want(it: dict, who: str) -> bool:
+    """그 판정기 기준의 설계상 기대. 팀원 = expected(팀원 stage3 기준), 우리 = expected_ours (옛 manifest 는 expected)."""
+    return it["expected"] if who == "team" else it.get("expected_ours", it["expected"])
+
+
 def report(meta: dict, team_commit: str) -> None:
     import matplotlib
     matplotlib.use("Agg")
@@ -116,6 +121,7 @@ def report(meta: dict, team_commit: str) -> None:
     with open(CHECKS / "results.csv", "w", newline="", encoding="utf-8-sig") as fh:
         wr = csv.writer(fh)
         wr.writerow(["background", "id", "family", "sweep", "value", "expected", "expected_type", "broken",
+                     "expected_ours", "broken_ours",
                      "ours_lum", "ours_red", "ours_stripe", "ours_lum_flashes", "ours_lum_area", "ours_red_duv",
                      "ours_red_area", "ours_stripe_area", "ours_stripe_motion", "ours_sec",
                      "team_lum", "team_red", "team_stripe", "team_sustained", "team_contrast", "team_sec"])
@@ -123,7 +129,7 @@ def report(meta: dict, team_commit: str) -> None:
             o = o or {}
             t = t or {}
             wr.writerow([it["background"], it["id"], it["family"], it["sweep"], it["value"], it["expected"],
-                         it["expected_type"], it["broken"],
+                         it["expected_type"], it["broken"], want(it, "ours"), it.get("broken_ours", it["broken"]),
                          o.get("lum"), o.get("red"), o.get("stripe"), o.get("lum_flashes"), o.get("lum_area"),
                          o.get("red_duv"), o.get("red_area"), o.get("stripe_area"), o.get("stripe_motion"),
                          round(o["sec"], 1) if "sec" in o else None,
@@ -133,7 +139,7 @@ def report(meta: dict, team_commit: str) -> None:
     bgs = sorted({it["background"] for it in items}, key=lambda b: (b != "gray", b))
     BG_KO = {"gray": "회색", "bbb80": "BBB"}
 
-    # 일치율: 생성 의도(기대) 대비, 그 종류 판정만
+    # 일치율: 각 판정기를 '자기 기준의 기대'와 비교 (우리 ↔ expected_ours, 팀원 ↔ expected), 그 종류 판정만
     def agree(fam: str, who: str, bg: str):
         n = k = 0
         for it, o, t in rows:
@@ -144,16 +150,17 @@ def report(meta: dict, team_commit: str) -> None:
             if d is None:
                 continue
             n += 1
-            k += int(d == it["expected"])
+            k += int(d == want(it, who))
         return k, n
 
     # 그림 1~3: 계열별 스윕 판정 지도
     SW_KO = {"delta_cd": "ΔL (cd/m²)", "area": "면적", "hz": "주파수 (Hz)", "wave": "파형", "dark_cd": "어두운 쪽 (cd/m²)",
              "delta_uv": "Δu′v′", "sat_ratio": "A의 R/(R+G+B)", "cpd": "공간 주파수 (cpd)", "area_static": "면적 (정지)",
-             "area_reversing": "면적 (반전 5 Hz)", "contrast_cd": "밝기 차 ΔL (cd/m²)", "angle": "방향 (°)", "drift_dps": "흐름 속도 (°/s)"}
+             "area_reversing": "면적 (반전 5 Hz)", "contrast_cd": "밝기 차 ΔL (cd/m²)", "angle": "방향 (°)", "drift_dps": "흐름 속도 (°/s)",
+             "floor_r8": "순수 빨강의 R 값 (8비트, ↔ 검정)"}
     THR = {("lum", "delta_cd"): 20, ("lum", "area"): 0.25, ("lum", "hz"): 3, ("lum", "dark_cd"): 160,
            ("red", "delta_uv"): 0.2, ("red", "sat_ratio"): 0.8, ("red", "area"): 0.25, ("red", "hz"): 3,
-           ("stripe", "cpd"): (1, 8), ("stripe", "area_static"): 0.4, ("stripe", "area_reversing"): 0.25,
+           ("stripe", "cpd"): (1, 10), ("red", "floor_r8"): 71, ("stripe", "area_static"): 0.4, ("stripe", "area_reversing"): 0.25,
            ("stripe", "contrast_cd"): 20}
     for fam in ("lum", "red", "stripe"):
         sweeps = list(dict.fromkeys(it["sweep"] for it, _, _ in rows if it["family"] == fam))
@@ -174,7 +181,7 @@ def report(meta: dict, team_commit: str) -> None:
                     d = detected(o if who == "ours" else t, fam)
                     if d is None:
                         continue
-                    ok = d == it["expected"]
+                    ok = d == want(it, who)
                     ax.scatter(xs[it["value"]], y, s=70, marker="o",
                                facecolors=("#B4441C" if d else "white"),
                                edgecolors=("#1C2430" if ok else "#E0A800"), linewidths=(1.2 if ok else 2.6), zorder=3)
@@ -284,7 +291,9 @@ def report(meta: dict, team_commit: str) -> None:
          f"> 768×432, 30 fps, 60프레임(2초), 1도당 {ppd:.1f} px (56 cm·15인치). 바탕: 균일 회색(sRGB 128) / BBB 1080p 80초~",
          f"> 팀원 판별기: lumi-lab-rockrovks `{team_commit}` `vdcoreops_v2.analyze_video_frames` 수정 없이 기본 설정",
          "> ⚠️ 영상은 광과민성 위험 자극이라 재생하지 않았습니다. 모든 그림은 수치 그래프입니다.", "",
-         "## 일치율 (생성 의도 대비, 그 종류의 판정만)", "", "| 종류 | " + " | ".join(f"{'팀원' if w == 'team' else '우리'}·{BG_KO.get(b, b)}" for w, b in combos) + " |",
+         "> 기대는 둘입니다: 팀원 판별기는 팀원 보고서(stage3) 기준 기대와, 우리 판정기는 우리 기준(ITU-R BT.1702-3 + "
+         "docs/STANDARDS.md) 기대와 비교합니다. 두 기대가 갈리는 클립은 표에 '우리 기준' 열로 따로 적었습니다.", "",
+         "## 일치율 (각자 기준의 기대 대비, 그 종류의 판정만)", "", "| 종류 | " + " | ".join(f"{'팀원' if w == 'team' else '우리'}·{BG_KO.get(b, b)}" for w, b in combos) + " |",
          "|---|" + "---|" * len(combos)]
     for fam in fams:
         cells = []
@@ -295,7 +304,8 @@ def report(meta: dict, team_commit: str) -> None:
     L += ["", "![일치율](fig_agreement.png)", "", "![휘도](fig_sweep_lum.png)", "", "![적색](fig_sweep_red.png)", "",
           "![줄무늬](fig_sweep_stripe.png)", "", "![측정 대 설계](fig_measured_vs_design.png)", "",
           "![프레임별](fig_timeseries.png)", "", "## 클립별 결과", "",
-          "| 바탕 | 클립 | 의도 | 무너뜨린 조건 | 우리 휘도/적색/줄무늬 | 팀원 휘도/적색/줄무늬 (+지속/고대비) |", "|---|---|---|---|---|---|"]
+          "| 바탕 | 클립 | 기대 (팀원 기준) | 무너뜨린 조건 | 우리 기준이 다르면 | 우리 휘도/적색/줄무늬 | 팀원 휘도/적색/줄무늬 (+지속/고대비) |",
+          "|---|---|---|---|---|---|---|"]
     yn = lambda v: "-" if v is None else ("●" if v else "○")
     for it, o, t in rows:
         o = o or {}
@@ -303,6 +313,7 @@ def report(meta: dict, team_commit: str) -> None:
         extra = ",".join(n for n, k in (("지속", "sustained"), ("고대비", "contrast")) if t.get(k))
         L.append(f"| {BG_KO.get(it['background'], it['background'])} | `{it['id']}` | "
                  f"{'위험' if it['expected'] else '안전'}({TYPE_KO.get(it['expected_type'], '')}) | {it['broken']} | "
+                 f"{'' if want(it, 'ours') == it['expected'] else ('위험' if want(it, 'ours') else '안전: ' + it['broken_ours'])} | "
                  f"{yn(o.get('lum'))}{yn(o.get('red'))}{yn(o.get('stripe'))} | "
                  f"{yn(t.get('lum'))}{yn(t.get('red'))}{yn(t.get('stripe'))} {extra} |")
     L += ["", "● 위험 판정, ○ 안전. 원본 자료: [results.csv](results.csv)", ""]

@@ -287,9 +287,22 @@ def red_pair(sat_ratio: float, delta_uv: float, y_rel: float = RED_PAIR_Y) -> di
             lo = mid
         else:
             hi = mid
-    b_u8, d, rb, sb = best
+    return red_pair_from_colors(a_u8, best[0])
+
+
+def red_pair_from_colors(a_rgb, b_rgb) -> dict:
+    """8비트 색 두 개 (R,G,B) 를 판정기로 잰 값. red_pair 와 같은 키 + excess_a·excess_b.
+
+    excess = 선형 R − G − B. 팀원 기준(stage3 §1.2 방법 A)은 포화 빨강에 excess ≥ 0.0625(#470000 이상)도 요구한다
+    (거의 검정인 빨강을 빼려는 하한). 우리 판정기에는 이 하한이 없다.
+    """
+    a_u8, b_u8 = tuple(int(c) for c in a_rgb), tuple(int(c) for c in b_rgb)
+    ra, ua, va, sa = _red_measure(a_u8)
+    rb, ub, vb, sb = _red_measure(b_u8)
+    la, lb = srgb_to_linear(np.array(a_u8, np.uint8)), srgb_to_linear(np.array(b_u8, np.uint8))
     return {"a_rgb": a_u8, "b_rgb": b_u8, "ratio_a": ra, "ratio_b": rb, "sat_a": sa, "sat_b": sb,
-            "delta_uv": d, "lum_a_cd": _lum_cd(a_u8), "lum_b_cd": _lum_cd(b_u8)}
+            "delta_uv": float(np.hypot(ub - ua, vb - va)), "lum_a_cd": _lum_cd(a_u8), "lum_b_cd": _lum_cd(b_u8),
+            "excess_a": float(la[0] - la[1] - la[2]), "excess_b": float(lb[0] - lb[1] - lb[2])}
 
 
 def render_red(clean_bgr: np.ndarray, mask: np.ndarray, w: np.ndarray, a_rgb, b_rgb) -> np.ndarray:
