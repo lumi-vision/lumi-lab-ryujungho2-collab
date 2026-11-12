@@ -606,6 +606,10 @@ MOTION_ROWS = 64                  # 움직임 판정에 쓰는 스캔 직선 수
 STRIPE_EXTREMUM_TOL = 0.25        # 줄 극값을 옮길 최소 차이 (cd/m²) — 구현 선택. 비스듬한 스캔의 보간이 만드는
                                   # 소수점 차이를 따라 극값이 평평한 배경 안으로 밀려가는 것을 막음(2026-11-10).
                                   # 8비트 한 단계(배경 38 cd/m² 근처 약 0.8)보다 작게 둠
+PATTERN_REGULARITY_CV = 0.15      # 규칙성: 연속한 줄 한 주기 폭들의 변동 계수(표준편차/평균) 상한 — 구현 선택(2026-11-12).
+                                  # 기준 원문은 'regular pattern' 이라고만 한다. 교대 횟수만 세면 잡음·질감·폭이 제각각인
+                                  # 막대도 줄무늬가 되므로 간격이 일정한지 확인한다. None 이면 끔(이전 동작).
+PATTERN_REGULARITY_Q_PX = 0.4     # 주기 폭을 정수 픽셀로 재면서 생기는 오차 허용 (표준편차, 픽셀)
 PATTERN_DYNAMIC_FRAC = MOTION_STATIC_MAX   # (호환용 옛 이름)
 PATTERN_MIN_SEC = 0.5             # 1초 창 안의 줄무늬 후보 프레임이 이 시간 이상이면 위험
 PATTERN_ANGLES = tuple(range(0, 180, 15))   # 스캔 방향 (도)
@@ -681,6 +685,11 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
     실제보다 낮은 cpd 로 재진다. 그래서 stripe_masks 가 모든 방향의 cpd 중 최댓값(= 줄에 수직인 방향의 값)으로
     상한을 판정한다 (2026-11-10: 이전 구현은 방향마다 상한을 잘라서, 10 cpd 줄무늬도 비스듬한 방향에서 통과했음).
     유효한 줄이 k 개 이어지면 극값은 k+1 개, 쌍 수 = (k+1)//2. 5쌍 ⇔ k ≥ 9.
+    규칙성(PATTERN_REGULARITY_CV, 2026-11-12): 가장 최근 need(= 2·쌍 수 − 1)개 줄의 폭에서 이웃한 두 줄을 더한
+      '한 주기 폭' need−1 개를 만들고, 표준편차 ≤ sqrt((CV·평균)² + Q²) 일 때만 줄무늬로 표시한다
+      (Q = 정수 픽셀 오차 허용). 반 주기가 아니라 한 주기를 쓰는 이유: 주기가 2~3픽셀이면 반 주기는 1·2 가 번갈아 나와
+      규칙적인 줄무늬도 변동이 커 보인다. 표시 구간은 그 창의 첫 극값부터 현재 극값까지이고, 창이 한 줄씩 옮겨 가며
+      합집합이 된다. 폭이 제각각인 구간은 줄이 이어져도 표시되지 않는다.
     줄무늬 구간 = 그 연속 구간의 첫 극값부터 마지막으로 확정된 극값까지 [첫 극값, 마지막 극값).
     (2026-11-10: 이전에는 '마지막 극값 + 마지막 줄 폭'까지 표시했다. 마지막 극값은 줄무늬가 끝나고 배경이
      시작되는 곳이라 배경을 줄 폭만큼 더 칠했고, 비스듬한 스캔에서는 1/cos θ 배로 더 넘쳐 면적이 약 +4.5%p 과대 측정됐다.
@@ -701,6 +710,8 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
     prev = np.full(n, np.nan); prev_i = np.full(n, -1, np.int64)  # 확정된 직전 극값
     k = np.zeros(n, np.int64); run_start = np.zeros(n, np.int64)
     run_hsum = np.zeros(n)                                  # 연속 구간의 반 주기 합 (평균 cpd 계산용)
+    hist = np.zeros((n, need))                              # 최근 need 개 줄의 폭 (원형 버퍼, 규칙성 검사용)
+    order = np.arange(need)
     segs = []                                               # (줄 번호, 시작, 끝, cpd) — 5쌍 이상 구간
 
     def confirm(rows: np.ndarray) -> None:
@@ -714,11 +725,22 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
             start_new = ok & (k[has_prev] == 0)
             run_start[has_prev[start_new]] = prev_i[has_prev[start_new]]
             run_hsum[has_prev] = np.where(ok, run_hsum[has_prev] + half, 0.0)
+            hist[has_prev[ok], k[has_prev[ok]] % need] = half[ok]
             k[has_prev] = np.where(ok, k[has_prev] + 1, 0)
             hit = has_prev[ok & (k[has_prev] >= need)]
-            if hit.size:
+            if hit.size and PATTERN_REGULARITY_CV is None:
                 seg_cpd = ppd / (2.0 * run_hsum[hit] / k[hit])
                 segs.append((hit, run_start[hit].copy(), cur_i[hit].copy(), seg_cpd))
+            elif hit.size:
+                win = hist[hit[:, None], (k[hit][:, None] + order[None]) % need]     # 오래된 줄 → 최근 줄
+                per = win[:, :-1] + win[:, 1:]                                        # 한 주기 폭 need−1 개
+                mean = per.mean(axis=1)
+                regular = per.std(axis=1) <= np.sqrt((PATTERN_REGULARITY_CV * mean) ** 2 + PATTERN_REGULARITY_Q_PX ** 2)
+                hit, win = hit[regular], win[regular]
+                if hit.size:
+                    span = win.sum(axis=1)
+                    seg_cpd = ppd / (2.0 * span / need)
+                    segs.append((hit, (cur_i[hit] - np.round(span)).astype(np.int64), cur_i[hit].copy(), seg_cpd))
         prev[rows], prev_i[rows] = cur[rows], cur_i[rows]
 
     for j in range(m + 1):

@@ -13,7 +13,7 @@ ITU-R BT.1702-3 원문 설정(반전 > 25%, 흐름 제외)은 itu 픽스처로 �
 import numpy as np
 import pytest
 
-from lumi_synth import measure
+from lumi_synth import measure, oracle
 
 FPS = 30
 H, W = 90, 160
@@ -176,3 +176,33 @@ def test_flash_outside_drift_region_still_counts():
     v[~on, :, 96:] = 40
     r = measure.analyze_all(v, FPS)
     assert r["flash"]["dangerous"] is True
+
+
+def _bars(regular: bool, h: int = 180, w: int = 320, cpd: float = 2.0, area: float = 0.55) -> np.ndarray:
+    """세로 막대 한 프레임(1×H×W 휘도). regular=False 면 막대 폭이 0.3~1.7배로 제각각(평균은 같음)."""
+    half = measure.pixels_per_degree(w, h, 0.0) / cpd / 2.0
+    xs = np.arange(w, dtype=np.float64)
+    if regular:
+        bright = (xs // half) % 2 == 0
+    else:
+        edges = np.cumsum(np.random.default_rng(7).uniform(0.3, 1.7, 2000) * half)
+        bright = np.searchsorted(edges, xs) % 2 == 0
+    lum = np.full((h, w), 40.0, np.float32)
+    m = oracle.region_mask("rectangle", area, h, w)
+    lum[m] = np.broadcast_to(np.where(bright, 110.0, 10.0), (h, w))[m]
+    return lum[None]
+
+
+def test_regularity_keeps_regular_stripes_and_rejects_irregular_bars():
+    """규칙성(2026-11-12): 간격이 일정한 줄무늬는 면적 그대로, 폭이 제각각인 막대와 잡음은 40% 아래로 재진다."""
+    assert measure.stripe_masks(_bars(True)).mean() > 0.50
+    assert measure.stripe_masks(_bars(False)).mean() < 0.40
+    noise = np.full((180, 320), 40.0, np.float32)
+    m = oracle.region_mask("rectangle", 0.55, 180, 320)
+    noise[m] = np.random.default_rng(3).uniform(10, 110, (180, 320)).astype(np.float32)[m]
+    assert measure.stripe_masks(noise[None]).mean() < 0.40
+
+
+def test_regularity_off_restores_old_behaviour(monkeypatch):
+    monkeypatch.setattr(measure, "PATTERN_REGULARITY_CV", None)
+    assert measure.stripe_masks(_bars(False)).mean() > 0.45
