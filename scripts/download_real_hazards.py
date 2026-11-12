@@ -39,7 +39,7 @@ def download(url: str, dest: Path, size: int | None = None) -> None:
             return
         except Exception as e:  # noqa: BLE001
             print(f"  재시도 {attempt + 1}: {dest.name} ({e})", flush=True)
-            time.sleep(3 * (attempt + 1))
+            time.sleep(10 * (attempt + 1))
     raise RuntimeError(f"받기 실패: {url}")
 
 
@@ -63,11 +63,17 @@ def south() -> None:
     dest = OUT / "south2021"
     (dest / "file_list.json").parent.mkdir(parents=True, exist_ok=True)
     (dest / "file_list.json").write_text(json.dumps([[str(p), u, s] for p, u, s in files], ensure_ascii=False, indent=0))
+    failed = []
     for i, (rel, url, size) in enumerate(files, 1):
-        download(url, dest / rel, size)
+        try:
+            download(url, dest / rel, size)
+        except RuntimeError:
+            failed.append(str(rel))                  # 서버 오류(403/500)는 기록하고 넘어감 — 다시 실행하면 이어 받음
+        time.sleep(0.3)                              # OSF 요청 간격
         if i % 100 == 0:
-            print(f"  {i}/{len(files)}", flush=True)
-    print("끝:", dest, flush=True)
+            print(f"  {i}/{len(files)} (실패 {len(failed)})", flush=True)
+    (dest / "failed.json").write_text(json.dumps(failed, ensure_ascii=False, indent=0))
+    print(f"끝: {dest} · 실패 {len(failed)}개", flush=True)
 
 
 def kaya() -> None:
