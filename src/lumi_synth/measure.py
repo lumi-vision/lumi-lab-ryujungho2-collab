@@ -458,6 +458,9 @@ def flash_from_transitions(signed: np.ndarray, fps: float, c: int | None = None,
 # =============================================================================================
 RED_SAT_RATIO = 0.8                 # 포화 빨강: 선형 R/(R+G+B) 이상(≥)
 RED_DELTA_UV = 0.2                  # 색 차이: Δu′v′ 초과(>)
+RED_MIN_EXCESS = 0.0625             # 포화 빨강 하한: 선형 R − G − B 이상(≥). 팀원 stage3 §1.2 방법 A (#470000 이상).
+                                    # WCAG 2.0 옛 적색 공식 (R−G−B)×320 ≥ 20 에서 유도. 거의 검정인 빨강(#080101 등,
+                                    # J&V 2024 표 5 지적)을 뺀다. 0 으로 두면 하한 없음(2026-11-12 이전 동작)
 D65_UV = (0.1978, 0.4683)           # 검정의 색도로 쓰는 D65 백색점
 RED_CHANGE_EPS = 0.02               # 이보다 작은 색도 변화는 '상태 변화'로 보지 않음 (깜빡임 쌍 짓기용) — 구현 선택
 _XYZ = np.array([[0.4124564, 0.3575761, 0.1804375],
@@ -471,7 +474,7 @@ def red_state(frames_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarra
     lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4).astype(np.float64)
     b, g, r = lin[..., 0], lin[..., 1], lin[..., 2]
     total = r + g + b
-    sat = (total > 0) & (r >= RED_SAT_RATIO * total)
+    sat = (total > 0) & (r >= RED_SAT_RATIO * total) & (r - g - b >= RED_MIN_EXCESS)
     x = _XYZ[0, 0] * r + _XYZ[0, 1] * g + _XYZ[0, 2] * b
     y = _XYZ[1, 0] * r + _XYZ[1, 1] * g + _XYZ[1, 2] * b
     z = _XYZ[2, 0] * r + _XYZ[2, 1] * g + _XYZ[2, 2] * b
@@ -559,13 +562,14 @@ def analyze_red(frames_bgr: np.ndarray, fps: float) -> dict:
 #   ⑤ 줄무늬 쌍     화면을 12방향(0°~165°, 15° 간격)으로 1픽셀 간격 직선을 그어 휘도 프로파일을 얻고,
 #                  20 cd/m² 히스테리시스로 '밝은 줄·어두운 줄' 극값을 찾는다. 이웃 극값 사이(줄 하나)가
 #                  (어두운 쪽 < 160) 이고 (공간 주파수 1~10 cpd) 이면 '유효한 줄'. 유효한 줄이 끊김 없이
-#                  10개(밝은 5 + 어두운 5 = 5쌍) 이상 이어진 구간의 픽셀을 그 프레임의 '줄무늬 픽셀'로 표시.
+#                  12개(밝은 6 + 어두운 6 = 6쌍) 이상 이어진 구간의 픽셀을 그 프레임의 '줄무늬 픽셀'로 표시.
 #   ⑥ 움직임 3분류  줄무늬에 수직인 방향의 '위치 × 시간' 휘도 단면을 ±0.5초 창에서 2차원 푸리에 변환해
 #                  (가) 시간 변화 에너지 비율 < 10%                → 정지(static)
 #                  (나) 방향 지수 |DI| ≥ 0.5 (한 방향 성분에 몰림)  → 흐름(drifting)
 #                  (다) 그 밖 (양방향 대칭 = 진동·반전·점멸)       → 반전(reversing)
 #                  DI = (E_한방향 − E_반대방향) / (E_한방향 + E_반대방향)  (운동 에너지, Adelson & Bergen 1985)
-#   ⑦ 면적          정지 > 40%, 반전 > 25%, 흐름은 제외(ITU·Ofcom 원문) 이면 그 프레임은 '줄무늬 후보'.
+#   ⑦ 면적          움직임과 상관없이 > 40% 이면 그 프레임은 '줄무늬 후보' (팀원 기준, 2026-11-12).
+#                  ITU·Ofcom 원문은 정지 > 40%, 반전 > 25%, 흐름 제외 — 상수로 바꿀 수 있음(아래 상수 설명).
 #   ⑧ 위험          아무 1초 창 안의 후보 프레임이 0.5초 이상(≥ ceil(W/2) 프레임)이면 위험.
 #
 # 출처 구분 (논문에 그대로 쓸 것 · 자세히: docs/PATTERN_LITERATURE.md, docs/STANDARDS.md §3)
@@ -588,10 +592,13 @@ def analyze_red(frames_bgr: np.ndarray, fps: float) -> dict:
 #   한계:       30 fps 에서 시간 주파수 15 Hz(나이퀴스트)는 방향을 알 수 없어 '반전'으로 분류됨(보수적).
 #               진동 15 Hz 같은 Binnie 조건은 30 fps 영상으로 표현 자체가 안 됨.
 # =============================================================================================
-PATTERN_MIN_PAIRS = 5             # 밝은·어두운 줄 쌍이 이 수 '이상'(≥)이면 줄무늬 (ITU 는 > 5)
-PATTERN_AREA_DYNAMIC = 0.25       # 반전(진동·점멸·명암 반전) 줄무늬 면적 한계, 경계 제외(>) — 원문
+# 2026-11-12: 아래 네 값을 팀원 기준(stage3 정량 기준 명세서 §2.5 = vdcore)으로 맞췄다. 팀원 기준은 움직이는 패턴을
+# 범위에서 빼고 프레임마다 정지 패턴 규칙만 적용한다. ITU-R BT.1702-3 Attachment 1 원문 값은 주석의 괄호 안:
+# 원문대로 판정하려면 PATTERN_AREA_DYNAMIC = 0.25, PATTERN_DRIFT_EXEMPT = True 로 바꾼다(움직임 분류는 그대로 계산됨).
+PATTERN_MIN_PAIRS = 6             # 밝은·어두운 줄 쌍이 이 수 '이상'(≥)이면 줄무늬 — 원문 "more than five" (이전 5)
+PATTERN_AREA_DYNAMIC = 0.40       # 반전·흐름 줄무늬 면적 한계, 경계 제외(>) — 팀원: 정지와 같은 40% (원문 0.25)
 PATTERN_AREA_STATIC = 0.40        # 정지 줄무늬 면적 한계, 경계 제외(>) — 원문
-PATTERN_DRIFT_EXEMPT = True       # 한 방향으로 매끄럽게 흐르는 줄무늬는 제외 — 원문 (False 면 25% 적용)
+PATTERN_DRIFT_EXEMPT = False      # True 면 한 방향 흐름 줄무늬 제외(원문)·휘도 판정에서도 제외(결정 A). 팀원: 제외 없음
 PATTERN_CPD = (1.0, 10.0)         # 위험 공간 주파수 (cycles per degree), 경계 포함 — EF 2026 합의(1~8)에 여유, 팀원과 같음
 MOTION_STATIC_MAX = 0.10          # 시간 변화 에너지 비율이 이 값 미만이면 정지 — 구현 선택
 MOTION_DRIFT_MIN_DI = 0.5         # 방향 지수 |DI| 가 이 값 이상이면 흐름 — 구현 선택
@@ -903,7 +910,7 @@ def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None =
             motion[t], time_ratio[t], direction_index[t] = cls, ratio, di
     dynamic = motion == "reversing"
 
-    # ⑦ 면적: 정지 > 40%, 반전 > 25%, 흐름은 제외(원문) 또는 25%
+    # ⑦ 면적: 정지는 PATTERN_AREA_STATIC, 반전은 PATTERN_AREA_DYNAMIC, 흐름은 제외(PATTERN_DRIFT_EXEMPT) 또는 반전과 같음
     drift_limit = np.inf if PATTERN_DRIFT_EXEMPT else PATTERN_AREA_DYNAMIC
     limit = np.where(motion == "static", PATTERN_AREA_STATIC,
                      np.where(motion == "drifting", drift_limit, PATTERN_AREA_DYNAMIC))
@@ -940,7 +947,8 @@ def analyze_all(frames_bgr: np.ndarray, fps: float) -> dict:
 
     hazard_frames·hazard_mask 는 세 판정의 합집합. 휘도와 픽셀 전이는 한 번만 계산한다.
 
-    흐름 줄무늬 제외 (2026-11-10 결정 A): 줄무늬 판정이 '흐름(drifting)'으로 분류한 프레임의 줄무늬 픽셀에서
+    흐름 줄무늬 제외 (2026-11-10 결정 A, PATTERN_DRIFT_EXEMPT 가 True 일 때만 — 2026-11-12 부터 기본은 꺼짐):
+    줄무늬 판정이 '흐름(drifting)'으로 분류한 프레임의 줄무늬 픽셀에서
     생긴 휘도 전이는 휘도 깜빡임으로 세지 않는다. 한 방향으로 흐르는 줄무늬는 각 픽셀이 주기적으로 밝아졌다
     어두워져 휘도 깜빡임 조건을 넘을 수 있지만, 표준은 줄무늬 규칙에서 이를 제외한다
     ("obviously flow smoothly across, into, or out of the screen in one direction", ITC 2001 → Ofcom → ITU-R BT.1702-3
@@ -950,7 +958,7 @@ def analyze_all(frames_bgr: np.ndarray, fps: float) -> dict:
     lum = luminance_cd(frames_bgr)
     signed = pixel_transitions(lum)
     pattern = analyze_pattern(frames_bgr, fps, lum=lum, signed=signed)
-    drift = (pattern["motion"] == "drifting")
+    drift = (pattern["motion"] == "drifting") & PATTERN_DRIFT_EXEMPT
     if drift.any():
         signed = signed.copy()
         signed[drift] = np.where(pattern["stripes"][drift], 0, signed[drift])

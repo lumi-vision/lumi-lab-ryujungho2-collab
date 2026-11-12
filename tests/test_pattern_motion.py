@@ -1,5 +1,8 @@
 """줄무늬 판정: 공간 주파수 1~10 cpd, 움직임 3분류(정지·반전·흐름), 분류별 면적 기준.
 
+기본 설정은 팀원 기준(2026-11-12): 움직임과 상관없이 면적 > 40%, 흐름 제외 없음, 6쌍 이상.
+ITU-R BT.1702-3 원문 설정(반전 > 25%, 흐름 제외)은 itu 픽스처로 켜서 따로 시험한다.
+
 시험 영상: 160×90, 30 fps, 1초(30프레임). 화면 왼쪽 일부에만 세로 줄무늬(회색 30 ↔ 200,
 2.6 ↔ 115.5 cd/m²), 나머지는 회색 120. 계산을 빠르게 하려고 작은 화면을 쓰고, 시청 거리를 늘려
 1도당 픽셀 수를 실제 화면과 비슷하게(약 20 px/도) 맞춘다.
@@ -22,6 +25,13 @@ def about_20_px_per_degree(monkeypatch):
     # 15인치 16:9 화면의 가로 폭 약 33.2 cm 가 약 8°가 되도록 시청 거리를 늘림 → 160 px / 8° ≈ 20 px/도
     monkeypatch.setattr(measure, "VIEW_DISTANCE_CM", 237.0)
     yield
+
+
+@pytest.fixture
+def itu(monkeypatch):
+    """ITU-R BT.1702-3 Attachment 1 원문 설정: 반전 > 25%, 한 방향 흐름 제외(휘도 판정에서도 제외 = 결정 A)."""
+    monkeypatch.setattr(measure, "PATTERN_AREA_DYNAMIC", 0.25)
+    monkeypatch.setattr(measure, "PATTERN_DRIFT_EXEMPT", True)
 
 
 def stripes(period=8, area=0.55, motion="static", n=30, hz=5.0):
@@ -69,8 +79,15 @@ def test_motion_three_classes(motion, expected):
     assert share >= 0.8, (motion, expected, labels, r["time_ratio"].max(), r["direction_index"])
 
 
-def test_binnie_order_oscillation_static_drift():
-    """Binnie 1985 순서: 진동(위험) > 정지(면적에 따라) ≫ 흐름(제외). 면적 30%에서:
+def test_team_default_area_40_regardless_of_motion():
+    """팀원 기준(기본): 움직임과 상관없이 30%는 안전, 55%는 위험. 흐름 제외 없음."""
+    for motion in ("oscillate", "static", "drift"):
+        assert measure.analyze_pattern(stripes(area=0.30, motion=motion), FPS)["dangerous"] is False, motion
+        assert measure.analyze_pattern(stripes(area=0.55, motion=motion), FPS)["dangerous"] is True, motion
+
+
+def test_binnie_order_oscillation_static_drift(itu):
+    """(ITU 원문 설정) Binnie 1985 순서: 진동(위험) > 정지(면적에 따라) ≫ 흐름(제외). 면적 30%에서:
     반전 > 25% → 위험, 정지 ≤ 40% → 안전, 흐름 → 제외라 안전."""
     osc = measure.analyze_pattern(stripes(area=0.30, motion="oscillate"), FPS)
     sta = measure.analyze_pattern(stripes(area=0.30, motion="static"), FPS)
@@ -86,7 +103,7 @@ def test_static_large_area_is_dangerous():
     assert r["peak_stripe_area"] > 0.40 and r["dangerous"] is True
 
 
-def test_drift_large_area_is_exempt():
+def test_drift_large_area_is_exempt(itu):
     r = measure.analyze_pattern(stripes(area=0.55, motion="drift"), FPS)
     assert r["dangerous"] is False
 
@@ -122,7 +139,14 @@ def test_area_accuracy_within_1_point(area, period):
 
 
 # ---- 결정 A (2026-11-10): 흐름 줄무늬는 휘도 깜빡임에서도 제외 -----------------------------------
-def test_drift_stripes_flash_alone_is_dangerous_but_analyze_all_exempts():
+def test_drift_stripes_dangerous_by_default():
+    r = measure.analyze_all(stripes(area=0.55, motion="drift"), FPS)
+    assert r["pattern"]["dangerous"] is True                     # 팀원 기준: 흐름 제외 없음, > 40%
+    assert r["flash"]["drift_exempt_frames"] == 0                # 휘도 판정에서도 빼지 않음
+    assert r["dangerous"] is True
+
+
+def test_drift_stripes_flash_alone_is_dangerous_but_analyze_all_exempts(itu):
     v = stripes(area=0.55, motion="drift")
     assert measure.analyze(v, FPS)["dangerous"] is True          # 휘도만 보면 위험 (각 픽셀이 주기적으로 깜빡임)
     r = measure.analyze_all(v, FPS)
@@ -132,9 +156,15 @@ def test_drift_stripes_flash_alone_is_dangerous_but_analyze_all_exempts():
     assert r["dangerous"] is False
 
 
-def test_reversing_stripes_still_dangerous_in_analyze_all():
+def test_reversing_stripes_still_dangerous_in_analyze_all(itu):
     r = measure.analyze_all(stripes(area=0.30, motion="reverse"), FPS)
     assert r["pattern"]["dangerous"] is True and r["dangerous"] is True
+
+
+def test_reversing_stripes_30_percent_safe_by_default():
+    """팀원 기준(기본): 반전 30%는 줄무늬 ≤ 40%, 휘도는 방향별 면적 15% ≤ 25% → 안전."""
+    r = measure.analyze_all(stripes(area=0.30, motion="reverse"), FPS)
+    assert r["pattern"]["dangerous"] is False and r["dangerous"] is False
 
 
 def test_flash_outside_drift_region_still_counts():

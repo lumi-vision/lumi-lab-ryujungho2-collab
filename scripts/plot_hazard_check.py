@@ -23,9 +23,9 @@ IDS = ["c00_clean", "l_area_0.4", "l_area_0.2", "r_delta_uv_0.27", "r_delta_uv_0
 LABEL = {"c00_clean": "원본 (합성 없음)", "l_area_0.4": "휘도 40%·5 Hz·+50", "l_area_0.2": "휘도 20% (면적 미달)",
          "r_delta_uv_0.27": "적색 Δu′v′ 0.27", "r_delta_uv_0.19": "적색 Δu′v′ 0.19 (미달)",
          "r_sat_ratio_0.78": "적색 ρ 0.78 (포화 아님)", "r_floor_r8_71": "어두운 빨강 R 71 ↔ 검정",
-         "r_floor_r8_70": "어두운 빨강 R 70 ↔ 검정 (팀원 하한 미달)", "s_area_static_0.5": "줄무늬 정지 50%",
-         "s_area_static_0.36": "줄무늬 정지 36% (미달)", "s_area_reversing_0.32": "줄무늬 반전 32% (팀원 기준 미달)",
-         "s_area_reversing_0.22": "줄무늬 반전 22% (미달)", "s_drift_dps_4": "줄무늬 흐름 50% (우리 기준 제외)"}
+         "r_floor_r8_70": "어두운 빨강 R 70 ↔ 검정 (하한 미달)", "s_area_static_0.5": "줄무늬 정지 50%",
+         "s_area_static_0.36": "줄무늬 정지 36% (40% 미달)", "s_area_reversing_0.32": "줄무늬 반전 32% (40% 미달)",
+         "s_area_reversing_0.22": "줄무늬 반전 22% (40% 미달)", "s_drift_dps_4": "줄무늬 흐름 50% (제외 없음)"}
 
 
 def main() -> None:

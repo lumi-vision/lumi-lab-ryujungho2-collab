@@ -77,18 +77,26 @@ def test_team_flash_count_and_safe_interval():
     assert slow["broken"] == "밝기" and "밝기" not in slow["broken_ours"]
 
 
-def test_team_and_our_stripe_expectations_differ_only_on_motion():
+def test_stripe_expectations_team_default_and_itu_setting(monkeypatch):
     s = _sweep()
     static = s.expect_stripe(0.5, 3.0, 10, 110, "static", 60)
     assert static["expected"] and static["expected_ours"]
+    # 기본(2026-11-12): 판정기 상수가 팀원 기준과 같아 두 기대가 일치
     rev = s.expect_stripe(0.32, 3.0, 10, 110, "reversing", 40)
-    assert rev["expected"] is False and rev["expected_ours"] is True          # 팀원 > 40%, 우리 반전 > 25%
+    assert rev["expected"] is False and rev["expected_ours"] is False         # 움직임과 상관없이 > 40%
     drift = s.expect_stripe(0.5, 3.0, 10, 110, "drifting", 60)
-    assert drift["expected"] is True and drift["expected_ours"] is False      # 팀원은 흐름 제외 없음
+    assert drift["expected"] is True and drift["expected_ours"] is True       # 흐름 제외 없음
     assert s.expect_stripe(0.5, 9.0, 10, 110, "static", 60)["expected_ours"]  # 1~10 cpd 로 되돌림
     assert not s.expect_stripe(0.5, 10.5, 10, 110, "static", 60)["expected"]
     five = s.expect_stripe(0.5, 3.0, 10, 110, "static", 5)
-    assert five["expected"] is False and five["expected_ours"] is True        # 팀원 ≥ 6쌍, 우리 ≥ 5쌍
+    assert five["expected"] is False and five["expected_ours"] is False       # ≥ 6쌍
+    # 판정기를 ITU 원문 설정으로 바꾸면 expected_ours 만 따라 바뀐다 (expected 는 팀원 기준 고정)
+    monkeypatch.setattr(measure, "PATTERN_AREA_DYNAMIC", 0.25)
+    monkeypatch.setattr(measure, "PATTERN_DRIFT_EXEMPT", True)
+    rev = s.expect_stripe(0.32, 3.0, 10, 110, "reversing", 40)
+    assert rev["expected"] is False and rev["expected_ours"] is True
+    drift = s.expect_stripe(0.5, 3.0, 10, 110, "drifting", 60)
+    assert drift["expected"] is True and drift["expected_ours"] is False
 
 
 def test_team_red_floor_at_470000():
@@ -96,6 +104,25 @@ def test_team_red_floor_at_470000():
     w = oracle.wave("square", 5, 60, FPS)
     below = s.expect_red(0.4, w, oracle.red_pair_from_colors((70, 0, 0), (0, 0, 0)))
     above = s.expect_red(0.4, w, oracle.red_pair_from_colors((71, 0, 0), (0, 0, 0)))
-    assert below["expected"] is False and below["expected_ours"] is True
+    assert below["expected"] is False and below["expected_ours"] is False     # 판정기에도 같은 하한 (2026-11-12)
     assert above["expected"] is True and above["expected_ours"] is True
     assert oracle.red_pair(0.85, 0.25)["excess_a"] >= 0.0625                  # 기본 적색 쌍은 팀원 하한도 넘음
+
+
+def test_red_floor_in_detector():
+    """판정기: 순수 빨강 R 71(#470000) ↔ 검정은 적색 위험, R 70 은 포화 빨강 하한 미달이라 안전. 하한을 끄면 둘 다 위험."""
+    bg = np.full((30, 54, 96, 3), 128, np.uint8)
+    m = oracle.region_mask("rectangle", 0.4, 54, 96)
+    w = oracle.wave("square", 5, 30, FPS)
+    hit = oracle.render_red(bg, m, w, (71, 0, 0), (0, 0, 0))
+    miss = oracle.render_red(bg, m, w, (70, 0, 0), (0, 0, 0))
+    assert measure.analyze_red(hit, FPS)["dangerous"] is True
+    assert measure.analyze_red(miss, FPS)["dangerous"] is False
+
+
+def test_red_floor_off_restores_old_behaviour(monkeypatch):
+    monkeypatch.setattr(measure, "RED_MIN_EXCESS", 0.0)
+    bg = np.full((30, 54, 96, 3), 128, np.uint8)
+    m = oracle.region_mask("rectangle", 0.4, 54, 96)
+    miss = oracle.render_red(bg, m, oracle.wave("square", 5, 30, FPS), (70, 0, 0), (0, 0, 0))
+    assert measure.analyze_red(miss, FPS)["dangerous"] is True

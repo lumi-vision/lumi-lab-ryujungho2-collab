@@ -140,7 +140,7 @@ def expect_lum(area, levels_cd, dark_cd) -> dict:
 
 def expect_red(area, w, pair) -> dict:
     ours, team = [], []
-    if not (pair["sat_a"] and not pair["sat_b"]):
+    if not (pair["sat_a"] and not pair["sat_b"]):      # sat_* 는 판정기(measure.red_state)로 잰 값 — 하한 포함
         ours.append("포화 빨강")
     if not any(pair[f"sat_{k}"] and pair[f"excess_{k}"] >= TEAM["red_excess"] for k in "ab"):
         team.append("포화 빨강(하한 포함)")
@@ -171,7 +171,7 @@ def expect_stripe(area, cpd, lo, hi, motion, pairs) -> dict:
         ours.append("쌍 수")
     if not pairs >= TEAM["pat_pairs"]:
         team.append("쌍 수")
-    if motion == "drifting":
+    if motion == "drifting" and measure.PATTERN_DRIFT_EXEMPT:
         ours.append("흐름 제외")
     elif not area > (measure.PATTERN_AREA_STATIC if motion == "static" else measure.PATTERN_AREA_DYNAMIC):
         ours.append("면적")
