@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from lumi_synth.measure import AREA_LIMIT, MAX_FLASHES_PER_SEC, analyze  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "data/sources/big_buck_bunny/BigBuckBunny_640x360.m4v"
+SRC = ROOT / "data/raw/BigBuckBunny_640x360.m4v"
 OUT_VIDEO = ROOT / "data/clips/bbb_clip01.mkv"
 CHECKS = ROOT / "checks/step1"
 SECONDS = 5

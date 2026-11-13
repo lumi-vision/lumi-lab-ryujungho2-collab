@@ -1,6 +1,8 @@
 # 오라클 (규칙 기반 합성기)
 
-> 코드: `src/lumi_synth/oracle.py` · 실행: `scripts/make_oracle_dataset.py` · 결과: `checks/oracle/128x72_24fps.md`
+> 코드: `src/lumi_synth/oracle.py` · 실행: `scripts/make_oracle_dataset.py` · 결과: `checks/oracle/128x72_24fps.md` · 768×432 결과: `checks/oracle/768x432_24fps.md`
+
+> 적색·줄무늬 생성기도 `oracle.py` 에 있습니다(`render_red`, `red_pair`, `render_stripes`). 이 문서는 휘도 깜빡임 오라클을 설명하며, 적색·줄무늬 기준은 [STANDARDS.md](STANDARDS.md) 에 있습니다. 아래 라벨은 `measure.analyze` 로 붙였고 2026-11-13 판정기 수정([STANDARDS.md](STANDARDS.md) §8) 이전 판정이므로 다시 판정해야 합니다.
 
 ## 1. 역할
 

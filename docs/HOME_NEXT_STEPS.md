@@ -1,3 +1,5 @@
+> ⚠️ 이 문서는 보류·대체된 기록입니다(2026-11-13 기준). 남은 일(BBB 바탕 스윕, 감마 민감도 210개, 11-13 판정기 수정 이후 다시 판정)은 [PLAN.md](../PLAN.md) §7 로 옮겼습니다. 이후 기준 변경은 [STANDARDS.md](STANDARDS.md) 를 보세요.
+
 > ⏸ **보류 (2026-11-09)**: [PLAN.md](../PLAN.md) 개정 3판(합성 능력 검증: 휘도·적색·줄무늬, 팀원 판별기로 전·후 검사)을 먼저 끝낸 뒤 이 문서의 GAN·데이터셋 단계를 다시 검토합니다.
 
 # 집 PC(RTX 5080)에서 할 일 — 2026-11-09 노트북 작업 이후
@@ -18,7 +20,7 @@ python scripts\eval_hazard_sweep.py --only ours       # 우리 판정기 (클립
 python scripts\eval_hazard_sweep.py --only report --team-dir <lumi-lab-rockrovks 경로>
 ```
 
-- 결과: `checks/hazard_sweep/README.md`, `results.csv`, 그래프 `fig_sweep_{lum,red,stripe}.png`·`fig_agreement.png`·
+- 결과: `checks/hazard_sweep/README.md`(아직 없음, `eval_hazard_sweep.py --only report` 를 돌리면 만들어짐), `results.csv`, 그래프 `fig_sweep_{lum,red,stripe}.png`·`fig_agreement.png`·
   `fig_measured_vs_design.png`·`fig_timeseries.png` (수치 그래프만, 영상 프레임 그림 없음)
 - 팀원 판별기 버전은 실행 전에 `git -C <경로> log --oneline -1` 로 기록(노트북 확인 시 `e29ba9b`)
 - **합격**: 우리 판정기가 회색 바탕에서 생성 의도와 계열별로 일치. 어긋나면 원인(생성기 / 판정기 / 기대값 계산)을 README 에 기록

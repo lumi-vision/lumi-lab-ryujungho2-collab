@@ -63,7 +63,7 @@ Sintel·Tears of Steel 은 실사 합성(ToS)과 어두운 장면(Sintel)이 있
 | fps | 24 (원본 그대로) | 30 (24→30, 원본 4장마다 1장 복제 — 새 깜빡임 없음, 빈도 유지: 테스트로 확인) |
 | 클립 | 48프레임(2초) | 150프레임(5초) |
 | 데이터 폴더 | `data/oracle_128x72_24fps/` | `data/oracle_1920x1080_30fps/` |
-| 점검표 | `checks/oracle/128x72_24fps.md` | `checks/oracle/1920x1080_30fps.md` |
+| 점검표 | `checks/oracle/128x72_24fps.md` | `checks/oracle/1920x1080_30fps.md` (만들지 않음) |
 
 **섞이지 않게 하는 장치**
 - 바탕 파일(`backgrounds_<split>.npz`)에 fps·해상도를 저장하고, GAN 학습은 fps 를 여기서 읽는다(이전에는 24 고정 → 30 fps 트랙에서 1초 창을 틀리게 잴 뻔함).

@@ -105,6 +105,7 @@ def report(meta: dict, team_commit: str) -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from lumi_synth import measure
     plt.rcParams["font.family"] = ["Malgun Gothic", "sans-serif"]
     plt.rcParams["axes.unicode_minus"] = False
     CHECKS.mkdir(parents=True, exist_ok=True)
@@ -160,7 +161,7 @@ def report(meta: dict, team_commit: str) -> None:
              "floor_r8": "순수 빨강의 R 값 (8비트, ↔ 검정)"}
     THR = {("lum", "delta_cd"): 20, ("lum", "area"): 0.25, ("lum", "hz"): 3, ("lum", "dark_cd"): 160,
            ("red", "delta_uv"): 0.2, ("red", "sat_ratio"): 0.8, ("red", "area"): 0.25, ("red", "hz"): 3,
-           ("stripe", "cpd"): (1, 10), ("red", "floor_r8"): 71, ("stripe", "area_static"): 0.4, ("stripe", "area_reversing"): 0.25,
+           ("stripe", "cpd"): (1, 10), ("red", "floor_r8"): 71, ("stripe", "area_static"): 0.4, ("stripe", "area_reversing"): measure.PATTERN_AREA_DYNAMIC,
            ("stripe", "contrast_cd"): 20}
     for fam in ("lum", "red", "stripe"):
         sweeps = list(dict.fromkeys(it["sweep"] for it, _, _ in rows if it["family"] == fam))

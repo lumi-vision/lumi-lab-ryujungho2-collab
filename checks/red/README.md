@@ -1,5 +1,7 @@
 # 적색 판정 외부 검증: pse-test-media 적색 패턴 208개
 
+> ⚠️ 2026-11-13: 이 결과 뒤에 판정기가 바뀌었습니다(거의 검정의 색도를 D65 로 고정하는 RED_BLACK_Y 등 버그 6건 수정, ../../docs/STANDARDS.md §8). 그 뒤의 208개 재검증은 아직 하지 않았습니다.
+
 > 2026-11-12 · 코드: `src/lumi_synth/measure.py` `analyze_red` · 스크립트: `scripts/validate_red_pse.py`
 > 자료: pse-test-media `red_flash_patterns/30fps` (커밋 `ef78542`, BSD-3). CSV 한 줄 = 한 프레임, 화면 전체 색으로 재현(32×18, 30 fps)
 > 기준: 포화 빨강 선형 R/(R+G+B) ≥ 0.8, Δu′v′ > 0.2 (WCAG 2.2), 면적 > 25%, 1초 전이 ≥ 7 (ITU-R BT.1702-3)

@@ -1,5 +1,7 @@
 # 시연 영상 9개: 우리 판정기 대 팀원 판별기 (만들기 전 / 후)
 
+> ⚠️ 이 문서는 2026-11-10 시점 기록입니다. 이후 기준 변경(11-12: 6쌍·움직임 무관 40%·흐름 제외 끔·1~10 cpd·규칙성, 11-13: 판정기 버그 6건 수정)은 ../../docs/STANDARDS.md 를 보세요.
+
 > 만든 날 2026-11-10 · 영상: `scripts/make_demo_hazards.py` (Git 제외, `data/hazard_demo/`) · 평가: `scripts/eval_demo_hazards.py`
 > 바탕: BBB 1080p 80초~, 960×540, 30 fps, 60프레임(2초), 1도당 29.1 px
 > 팀원 판별기: lumi-lab-rockrovks `e29ba9b` `Fullscreen/A1/vdcoreops_v2.py` `evaluate_video_pse_risk` (수정 없이 기본 설정: laptop 56 cm, 15인치, 긴 변 720, 334 ms)

@@ -1,5 +1,7 @@
 # 줄무늬 판정 개정 점검: 1~8 cpd, 움직임 3분류 (2026-11-10)
 
+> ⚠️ 이 문서는 2026-11-10 시점 기록입니다. 이후 기준 변경(11-12: 6쌍·움직임 무관 40%·흐름 제외 끔·1~10 cpd·규칙성, 11-13: 판정기 버그 6건 수정)은 ../../docs/STANDARDS.md 를 보세요. 이 점검의 1~8 cpd·움직임 3분류별 판정은 지금 기준과 다릅니다(1~10 cpd, 움직임과 상관없이 > 40%).
+
 > 코드: `src/lumi_synth/measure.py` (`analyze_pattern`, `motion_energy`, `classify_motion`, `stripe_masks`)
 > 테스트: `tests/test_pattern_motion.py` (15개) · 전체 `pytest` 27 passed, 1 skipped (torch 필요한 GAN 묶음)
 > 갱신 2026-11-10: 면적 과대 측정 수정 (§면적 정확도)

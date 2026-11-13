@@ -1,5 +1,7 @@
 # 적색 판정 정식 검증: pse-test-media 적색 세트 4개 (영상 96개, 1920×1080)
 
+> ⚠️ 이 문서는 2026-11-10 시점 기록입니다. 이후 기준 변경(11-12: 6쌍·움직임 무관 40%·흐름 제외 끔·1~10 cpd·규칙성, 11-13: 판정기 버그 6건 수정)은 ../../docs/STANDARDS.md 를 보세요. 11-12 포화 빨강 하한 RED_MIN_EXCESS 뒤에는 집 PC 에서 재검증했습니다(커밋 e925434: 적색 208/208, 세트 80/96 기존과 같음). 11-13 거의 검정 색도 고정(RED_BLACK_Y) 이후는 아직 다시 돌리지 않았습니다.
+
 > 2026-11-10 · 스크립트 `scripts/validate_red_sets.py` · 재현 `scripts/validate_rules_pse.py` `build_frames`(padding 10)
 > 판정: 우리 = 적색(`analyze_red`) 또는 휘도(`analyze`) 위험 · 정답 = `expected_result["itu_r1702_4"]` · 판정 시간 1338초
 
