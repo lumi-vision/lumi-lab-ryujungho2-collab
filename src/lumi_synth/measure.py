@@ -189,21 +189,35 @@ def pixel_transitions(lum: np.ndarray) -> np.ndarray:
       - 같은 방향으로 더 가면 기준점을 끝점으로 옮긴다(극값 추적).
       - ref에서 반대 방향으로 |ΔL| ≥ 20 이고 min(L, ref) < 160 이면 전이 → 방향을 바꾸고 ref = 현재값.
     그래서 여러 프레임에 걸친 느린 변화도 '한 번'으로 센다(프레임 간 차이만 보는 방식과 다름).
+    첫 전이 전(방향 모름)에는 처음부터의 최저점·최고점에서 잰다: 최저점에서 20 이상 올라가면(최저점 < 160) +1,
+    최고점에서 20 이상 내려가면(현재 < 160) −1, 둘 다면 변화가 큰 쪽.
+      (2026-11-13 수정: 이전에는 첫 프레임 값에서만 쟀다. 첫 프레임이 깜빡임의 중간 밝기이면 — 예: 100.6 cd/m²
+       다음 84.7 ↔ 116.8 반복, 진폭 ±16 — 어느 쪽으로도 20 을 넘지 않아 전이가 영원히 0 이었다. 코드 리뷰에서 발견)
     """
     ref = lum[0].copy()
+    lo, hi = lum[0].copy(), lum[0].copy()               # 방향을 모르는 동안의 최저·최고
     direction = np.zeros(lum.shape[1:], dtype=np.int8)  # +1 밝아지는 중, -1 어두워지는 중, 0 아직 없음
     out = np.zeros(lum.shape, dtype=np.int8)
     for t in range(1, len(lum)):
         v = lum[t]
+        unknown = direction == 0
         extend = ((direction == 1) & (v > ref)) | ((direction == -1) & (v < ref))
         ref = np.where(extend, v, ref)
         diff = v - ref
-        big = (np.abs(diff) >= DELTA_CD) & (np.minimum(v, ref) < DARK_LIMIT_CD) & ~extend
+        big = (np.abs(diff) >= DELTA_CD) & (np.minimum(v, ref) < DARK_LIMIT_CD) & ~extend & ~unknown
         new_dir = np.sign(diff).astype(np.int8)
+        up_mag, dn_mag = v - lo, hi - v                 # 방향 모름: 지금까지의 최저·최고에서 잰 변화
+        up = unknown & (up_mag >= DELTA_CD) & (lo < DARK_LIMIT_CD)
+        dn = unknown & (dn_mag >= DELTA_CD) & (v < DARK_LIMIT_CD)
+        first = np.where(up & dn, np.where(up_mag >= dn_mag, 1, -1),
+                         np.where(up, 1, np.where(dn, -1, 0))).astype(np.int8)
+        new_dir = np.where(unknown, first, new_dir)
+        big |= first != 0
         trans = big & (new_dir != direction)
         out[t] = np.where(trans, new_dir, 0)
         direction = np.where(trans, new_dir, direction)
         ref = np.where(big, v, ref)
+        lo, hi = np.minimum(lo, v), np.maximum(hi, v)
     return out
 
 
@@ -230,7 +244,7 @@ def directional_areas(signed: np.ndarray, c: int) -> tuple[np.ndarray, np.ndarra
     return a_up, a_dn
 
 
-def screen_transitions(a_up: np.ndarray, a_dn: np.ndarray, signed: np.ndarray) -> np.ndarray:
+def screen_transitions(a_up: np.ndarray, a_dn: np.ndarray, signed: np.ndarray, c: int | None = None) -> np.ndarray:
     """D1·D4: 방향별 면적 → 화면 전이 e[t] (+1/-1/0). 화면 상태가 바뀔 때만 센다.
 
     후보 조건: 방향 d 의 면적 A_d(t) > 25% 이고, **프레임 t 에 그 방향의 새 픽셀 전이가 실제로 있을 것**.
@@ -239,12 +253,32 @@ def screen_transitions(a_up: np.ndarray, a_dn: np.ndarray, signed: np.ndarray) -
     state = 마지막으로 센 화면 전이의 방향(처음 0).
       - 한 방향만 후보: 그 방향이 state와 다르면 전이. 같으면 '이어지는 같은 변화'라 세지 않음(D1).
       - 두 방향 모두 후보(D4): state의 반대 방향으로 전이 1번(state가 0이면 더 넓은 쪽).
+    c 를 주면 '한 번 센 픽셀 전이는 다시 쓰지 않는다': 화면 전이를 센 프레임까지의 그 방향 픽셀 전이(D4 면 두 방향 모두)는
+      소비된 것으로 보고, 후보 면적 A_d 를 창 c 안의 '소비되지 않은' 픽셀로만 잰다(a_up·a_dn 은 쓰지 않음).
+      (2026-11-13 수정: D4 로 반전된 체커보드에서 state 쪽 방향 면적이 창 c 동안 남아, 다음 프레임에 그 방향으로 픽셀
+       하나만 전이해도 화면 전이가 한 번 더 세어졌다 — 2 플래시/초가 4 로. 코드 리뷰에서 발견)
     """
     e = np.zeros(len(a_up), dtype=np.int8)
     state = 0
+    if c is not None:
+        shape = signed.shape[1:]
+        never = np.iinfo(np.int32).min // 2
+        last_up = np.full(shape, never, np.int32)          # 픽셀마다 마지막 밝아짐·어두워짐 전이 프레임
+        last_dn = np.full(shape, never, np.int32)
+        used_up = used_dn = never                           # 이 프레임까지의 전이는 이미 화면 전이로 셈
+        n_px = float(np.prod(shape))
     for t in range(len(a_up)):
-        up = a_up[t] > AREA_LIMIT and bool((signed[t] == 1).any())
-        dn = a_dn[t] > AREA_LIMIT and bool((signed[t] == -1).any())
+        if c is not None:
+            last_up[signed[t] == 1] = t
+            last_dn[signed[t] == -1] = t
+            area_up = np.count_nonzero(last_up > max(t - c, used_up)) / n_px
+            area_dn = np.count_nonzero(last_dn > max(t - c, used_dn)) / n_px
+        else:
+            area_up, area_dn = a_up[t], a_dn[t]
+        up = area_up > AREA_LIMIT and bool((signed[t] == 1).any())
+        dn = area_dn > AREA_LIMIT and bool((signed[t] == -1).any())
+        if up and dn:
+            d = -state if state != 0 else (1 if area_up >= area_dn else -1)
         if up and dn:
             d = -state if state != 0 else (1 if a_up[t] >= a_dn[t] else -1)
         elif up:
@@ -256,13 +290,27 @@ def screen_transitions(a_up: np.ndarray, a_dn: np.ndarray, signed: np.ndarray) -
         if d != state:
             e[t] = d
             state = d
+            if c is not None:                                # 센 전이 소비: D4 면 두 방향 모두
+                if d == 1 or (up and dn):
+                    used_up = t
+                if d == -1 or (up and dn):
+                    used_dn = t
     return e
 
 
 # ---- ④ 위험 ------------------------------------------------------------------------------
+def window_frames(fps: float) -> int:
+    """1초 창 [s, s+1초) 에 들어가는 프레임 수 W = ceil(fps). 29.97 → 30, 23.976 → 24, 12.5 → 13.
+
+    (2026-11-13 수정: 이전에는 round(fps) 였다. 파이썬 round 는 짝수 쪽으로 반올림해 12.5 → 12, 14.29 → 14 가 되어
+     1초에 전이 7번(3.1 Hz)을 6번으로 세고 위험을 놓쳤다. 코드 리뷰에서 발견)
+    """
+    return max(1, int(np.ceil(fps - 1e-9)))
+
+
 def window_counts(events: np.ndarray, fps: float) -> np.ndarray:
-    """각 프레임 s에서 시작하는 1초 창 [s, s+W) 안의 화면 전이 수 (W = round(fps))."""
-    w = max(1, int(round(fps)))
+    """각 프레임 s에서 시작하는 1초 창 [s, s+W) 안의 화면 전이 수 (W = window_frames(fps))."""
+    w = window_frames(fps)
     csum = np.concatenate([[0], np.cumsum(events != 0)])
     t_len = len(events)
     return csum[np.minimum(np.arange(t_len) + w, t_len)] - csum[:t_len]
@@ -311,7 +359,7 @@ def extended_flash(e: np.ndarray, fps: float, mode: str = "iris", min_transition
                        글자 그대로 읽은 변형).
     min_transitions=2 로 주면 1~3 Hz 변형(IRIS 는 2~3 Hz).
     """
-    w = max(1, int(round(fps)))
+    w = window_frames(fps)
     ev = (np.asarray(e) != 0).astype(np.int32)
     csum = np.concatenate([[0], np.cumsum(ev)])
     t_idx = np.arange(len(ev))
@@ -406,11 +454,11 @@ def flash_from_transitions(signed: np.ndarray, fps: float, c: int | None = None,
     if c is None:
         c = concurrency_frames(fps)
     a_up, a_dn = directional_areas(signed, c)
-    e = screen_transitions(a_up, a_dn, signed)
+    e = screen_transitions(a_up, a_dn, signed, c)
     if fast_ms is not None:
         e = merge_fast_flashes(e, fps, fast_ms)
     counts = window_counts(e, fps)
-    w = max(1, int(round(fps)))
+    w = window_frames(fps)
     hazardous_starts = np.flatnonzero(counts >= 2 * MAX_FLASHES_PER_SEC + 1)
 
     hazard_frames = np.zeros(len(e), dtype=bool)
@@ -463,6 +511,10 @@ RED_MIN_EXCESS = 0.0625             # 포화 빨강 하한: 선형 R − G − B
                                     # J&V 2024 표 5 지적)을 뺀다. 0 으로 두면 하한 없음(2026-11-12 이전 동작)
 D65_UV = (0.1978, 0.4683)           # 검정의 색도로 쓰는 D65 백색점
 RED_CHANGE_EPS = 0.02               # 이보다 작은 색도 변화는 '상태 변화'로 보지 않음 (깜빡임 쌍 짓기용) — 구현 선택
+RED_BLACK_Y = 0.005                 # 선형 휘도 Y 가 이보다 작으면(약 1 cd/m² 미만) 색도를 D65 로 고정 — 구현 선택(2026-11-13).
+                                    # 거의 검정은 (1,0,0)→(0,1,0) 같은 눈에 안 보이는 1단계 변화에도 u′v′ 가 크게 튀어
+                                    # '상태 변화'로 세어지고, 그 때문에 깜빡임 쌍 짓기가 어긋나 빨강↔검정 깜빡임을 통째로
+                                    # 놓쳤다(코드 리뷰에서 발견). 포화 빨강 하한(R−G−B ≥ 0.0625, Y ≥ 0.013)보다 낮아 빨강 판정에는 영향 없음
 _XYZ = np.array([[0.4124564, 0.3575761, 0.1804375],
                  [0.2126729, 0.7151522, 0.0721750],
                  [0.0193339, 0.1191920, 0.9503041]], dtype=np.float64)
@@ -479,7 +531,7 @@ def red_state(frames_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarra
     y = _XYZ[1, 0] * r + _XYZ[1, 1] * g + _XYZ[1, 2] * b
     z = _XYZ[2, 0] * r + _XYZ[2, 1] * g + _XYZ[2, 2] * b
     d = x + 15.0 * y + 3.0 * z
-    ok = d > 0
+    ok = (d > 0) & (y >= RED_BLACK_Y)               # 거의 검정은 색도를 D65 로 고정
     u = np.where(ok, 4.0 * x / np.where(ok, d, 1.0), D65_UV[0])
     v = np.where(ok, 9.0 * y / np.where(ok, d, 1.0), D65_UV[1])
     return sat, u.astype(np.float32), v.astype(np.float32)
@@ -585,7 +637,7 @@ def analyze_red(frames_bgr: np.ndarray, fps: float) -> dict:
 #   실험 근거:  움직임 3분류의 필요성 — Binnie, Findlay & Wilkins 1985(환자 10명): 진동 15 Hz PPR 0.97,
 #               정지 0.38, 한 방향 흐름 2.5~10°/s 0~0.04. 진동과 흐름은 한 점의 밝기 변화 주파수가 같아도
 #               위험이 정반대라, 픽셀 밝기 변화만으로는 구분할 수 없음 → 방향 에너지로 구분
-#   팀원 판정기를 따른 것: 5쌍 이상(원문은 'more than five' = 6쌍 이상, 1쌍 보수적), 시청 조건 56 cm·15인치
+#   팀원 판정기를 따른 것: 6쌍 이상(원문 'more than five' 와 같음, 2026-11-12 에 5 → 6), 시청 조건 56 cm·15인치
 #               (원문 출처 J&V 2024 표 2는 15인치 4:3 — 여기서는 16:9로 계산), 12방향 15° 간격
 #   LUMI 구현 선택 (근거 없음, 민감도 분석 대상): 정지 판정 시간 에너지 10%, 흐름 판정 |DI| 0.5,
 #               극값 히스테리시스 20 cd/m²(팀원 5), 줄무늬 픽셀과 면적을 같은 구간에서 잼, 화면 전체 스캔
@@ -600,6 +652,13 @@ PATTERN_AREA_DYNAMIC = 0.40       # 반전·흐름 줄무늬 면적 한계, 경�
 PATTERN_AREA_STATIC = 0.40        # 정지 줄무늬 면적 한계, 경계 제외(>) — 원문
 PATTERN_DRIFT_EXEMPT = False      # True 면 한 방향 흐름 줄무늬 제외(원문)·휘도 판정에서도 제외(결정 A). 팀원: 제외 없음
 PATTERN_CPD = (1.0, 10.0)         # 위험 공간 주파수 (cycles per degree), 경계 포함 — EF 2026 합의(1~8)에 여유, 팀원과 같음
+PATTERN_CPD_TOL_PX = 0.5          # cpd 하한을 '한 주기 폭 − 0.5 px'로 재는 정수 픽셀 오차 허용 — 구현 선택(2026-11-13).
+                                  # 극값 위치가 정수 픽셀이라 주기 3 px 줄무늬는 반 주기가 1·2 로 번갈아 재진다. 반 주기 하나로
+                                  # 하한을 재면 폭 2 인 줄에서 끊겨, 128×72 의 1.29 cpd(범위 안) 줄무늬가 면적 0 이었다.
+                                  # 허용 때문에 하한 바로 아래(약 0.9 cpd)도 들어올 수 있다 — 놓치는 쪽보다 보수적
+PATTERN_CPD_ORIENT_MARGIN = 1.15  # cpd 상한: 다른 방향의 고주파 무늬가 이 픽셀의 줄무늬를 지우지 않게 하는 여유 — 구현 선택(2026-11-13).
+                                  # 방향 θ 에서 잰 cpd 가 '최고 cpd 방향 무늬의 비스듬한 투영'(cpd_max·|cos Δθ|)보다 이 배수 이상
+                                  # 크면 다른 무늬로 본다(stripe_masks)
 MOTION_STATIC_MAX = 0.10          # 시간 변화 에너지 비율이 이 값 미만이면 정지 — 구현 선택
 MOTION_DRIFT_MIN_DI = 0.5         # 방향 지수 |DI| 가 이 값 이상이면 흐름 — 구현 선택
 MOTION_ROWS = 64                  # 움직임 판정에 쓰는 스캔 직선 수 (계산량 제한)
@@ -610,7 +669,6 @@ PATTERN_REGULARITY_CV = 0.15      # 규칙성: 연속한 줄 한 주기 폭들�
                                   # 기준 원문은 'regular pattern' 이라고만 한다. 교대 횟수만 세면 잡음·질감·폭이 제각각인
                                   # 막대도 줄무늬가 되므로 간격이 일정한지 확인한다. None 이면 끔(이전 동작).
 PATTERN_REGULARITY_Q_PX = 0.4     # 주기 폭을 정수 픽셀로 재면서 생기는 오차 허용 (표준편차, 픽셀)
-PATTERN_DYNAMIC_FRAC = MOTION_STATIC_MAX   # (호환용 옛 이름)
 PATTERN_MIN_SEC = 0.5             # 1초 창 안의 줄무늬 후보 프레임이 이 시간 이상이면 위험
 PATTERN_ANGLES = tuple(range(0, 180, 15))   # 스캔 방향 (도)
 VIEW_DISTANCE_CM = 56.0           # 노트북 표준 시청 거리 (팀원 판정기와 같음)
@@ -680,11 +738,12 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
       현재 극값에서 같은 방향으로 STRIPE_EXTREMUM_TOL 넘게 더 가면 극값을 옮기고(평평한 줄은 처음 닿은 곳),
       반대 방향으로 20 이상 물러나면 현재 극값을 '확정'하고 방향을 바꾼다.
     극값이 확정될 때마다 직전 극값과의 사이 = 줄 하나(반 주기 h 표본)를 검사한다:
-      유효 ⇔ min(두 극값) < 160 이고 ppd / (2h) ≥ 1 (cpd 하한만).
+      유효 ⇔ min(두 극값) < 160 이고 ppd / (h + h_직전 − 0.5) ≥ 1 (cpd 하한만. 한 주기 = 이 줄과 바로 앞 줄의 폭 합,
+      앞 줄이 없으면 2h. 2026-11-13 전에는 ppd / 2h 로 재서 홀수 주기 줄무늬가 끊겼다 — PATTERN_CPD_TOL_PX 참고).
     상한(10 cpd)은 여기서 자르지 않는다: 비스듬한 스캔 방향에서는 줄 간격이 1/cos(Δθ) 배로 넓어 보여
     실제보다 낮은 cpd 로 재진다. 그래서 stripe_masks 가 모든 방향의 cpd 중 최댓값(= 줄에 수직인 방향의 값)으로
     상한을 판정한다 (2026-11-10: 이전 구현은 방향마다 상한을 잘라서, 10 cpd 줄무늬도 비스듬한 방향에서 통과했음).
-    유효한 줄이 k 개 이어지면 극값은 k+1 개, 쌍 수 = (k+1)//2. 5쌍 ⇔ k ≥ 9.
+    유효한 줄이 k 개 이어지면 극값은 k+1 개, 쌍 수 = (k+1)//2. 6쌍 ⇔ k ≥ 11 (= 2·PATTERN_MIN_PAIRS − 1).
     규칙성(PATTERN_REGULARITY_CV, 2026-11-12): 가장 최근 need(= 2·쌍 수 − 1)개 줄의 폭에서 이웃한 두 줄을 더한
       '한 주기 폭' need−1 개를 만들고, 표준편차 ≤ sqrt((CV·평균)² + Q²) 일 때만 줄무늬로 표시한다
       (Q = 정수 픽셀 오차 허용). 반 주기가 아니라 한 주기를 쓰는 이유: 주기가 2~3픽셀이면 반 주기는 1·2 가 번갈아 나와
@@ -711,15 +770,19 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
     k = np.zeros(n, np.int64); run_start = np.zeros(n, np.int64)
     run_hsum = np.zeros(n)                                  # 연속 구간의 반 주기 합 (평균 cpd 계산용)
     hist = np.zeros((n, need))                              # 최근 need 개 줄의 폭 (원형 버퍼, 규칙성 검사용)
+    last_half = np.full(n, np.nan)                          # 바로 앞 줄의 폭 (유효 여부와 무관, cpd 하한용)
     order = np.arange(need)
-    segs = []                                               # (줄 번호, 시작, 끝, cpd) — 5쌍 이상 구간
+    segs = []                                               # (줄 번호, 시작, 끝, cpd) — PATTERN_MIN_PAIRS 쌍 이상 구간
 
     def confirm(rows: np.ndarray) -> None:
         """rows 의 '현재 극값'을 확정: 직전 극값과의 줄 하나를 검사하고 연속 구간을 갱신."""
         has_prev = rows[prev_i[rows] >= 0]
         if has_prev.size:
             half = (cur_i[has_prev] - prev_i[has_prev]).astype(np.float64)
-            cpd = ppd / (2.0 * np.maximum(half, 1e-9))
+            prev_half = last_half[has_prev]
+            period = half + np.where(np.isnan(prev_half), half, prev_half)
+            cpd = ppd / np.maximum(period - PATTERN_CPD_TOL_PX, 1e-9)
+            last_half[has_prev] = half
             ok = (np.minimum(cur[has_prev], prev[has_prev]) < DARK_LIMIT_CD) & \
                  (cpd >= PATTERN_CPD[0])
             start_new = ok & (k[has_prev] == 0)
@@ -743,15 +806,16 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
                     segs.append((hit, (cur_i[hit] - np.round(span)).astype(np.int64), cur_i[hit].copy(), seg_cpd))
         prev[rows], prev_i[rows] = cur[rows], cur_i[rows]
 
+    pt = np.ascontiguousarray(p.T)                          # 열을 연속 메모리로: p[:, j] 는 띄엄띄엄 읽어 약 6배 느렸다
     for j in range(m + 1):
-        v = p[:, j]
+        v = pt[j]
         nan = np.isnan(v)
         # 끊김: 추적 중인 극값을 확정하고 상태 초기화
         brk = np.flatnonzero(nan & (direction != 0))
         if brk.size:
             confirm(brk)
         reset = np.flatnonzero(nan)
-        direction[reset] = 0; k[reset] = 0; prev_i[reset] = -1
+        direction[reset] = 0; k[reset] = 0; prev_i[reset] = -1; last_half[reset] = np.nan
         lo[reset] = np.nan; hi[reset] = np.nan
 
         # 방향 모름: 최소·최대를 추적하다 차이가 20 이상이 되면 먼저 나온 쪽을 첫 극값으로 확정
@@ -794,25 +858,65 @@ def stripe_runs(profiles: np.ndarray, ppd: float, return_cpd: bool = False):
 def stripe_masks(lum: np.ndarray) -> np.ndarray:
     """⑤ 휘도(T×H×W) → 프레임별 줄무늬 픽셀 (T×H×W bool). 12방향의 합집합.
 
-    픽셀마다 모든 방향에서 잰 cpd 의 최댓값(= 줄에 수직인 방향의 cpd)이 PATTERN_CPD 안이어야 줄무늬로 인정.
+    cpd 범위 판정 (픽셀마다):
+      - 비스듬한 스캔은 줄 간격을 1/cos(Δθ) 배로 넓게 재서 cpd 를 낮게 잰다. 그래서 모든 방향 중 최댓값 cpd_max
+        (= 줄에 수직인 방향의 값)가 PATTERN_CPD 안이면 인정한다(2026-11-10).
+      - cpd_max 가 상한을 넘더라도, 다른 방향 θ 에서 범위 안의 cpd 를 쟀고 그 값이 최고 cpd 무늬의 비스듬한 투영
+        (cpd_max·|cos(θ − θ_max)|)보다 PATTERN_CPD_ORIENT_MARGIN 배 넘게 크면 '다른 방향의 별개 무늬'로 보고 인정한다.
+        (2026-11-13 수정: 이전에는 최댓값만 봐서, 세로 2.9 cpd 줄무늬의 밝은 줄에 가로 1 px 선(약 11.6 cpd)만 겹쳐도
+         그 픽셀들이 지워져 면적이 1.0 → 0.5 가 됐다. 코드 리뷰에서 발견)
+    메모리 때문에 프레임을 몇 장씩 나눠 계산한다(프레임끼리 독립).
     """
     t_len, h, w = lum.shape
     mask = np.zeros(lum.shape, dtype=bool)
-    cpd_max = np.zeros(lum.shape, dtype=np.float32)
-    for ang in PATTERN_ANGLES:
-        mx, my, valid = _scan_maps(h, w, ang)
-        prof = _sample(lum, mx, my, valid)                   # T×Hc×Wc
-        hc, wc = prof.shape[1:]
-        runs, cpd = stripe_runs(prof.reshape(t_len * hc, wc), pixels_per_degree(w, h, ang), return_cpd=True)
-        runs = runs.reshape(t_len, hc, wc) & valid[None]
-        cpd = cpd.reshape(t_len, hc, wc)
-        ti, ii, jj = np.nonzero(runs)
-        if ti.size:
+    out = np.zeros(lum.shape, dtype=bool)
+    lo, hi = PATTERN_CPD
+    angles = list(PATTERN_ANGLES)
+    cache_maps = h * w <= 1_000_000                          # 768×432 정도까지는 스캔 좌표를 한 번만 만든다
+    maps = {a: _scan_maps(h, w, a) for a in angles} if cache_maps else {}
+    # 방향별 cpd 지도는 범위 안 값만 uint8(1/16 cpd 단위)로 둔다. 묶음이 작으면 stripe_runs 의 열 루프가 묶음 수만큼
+    # 반복돼 느려지므로(6장씩 나눴을 때 768×432×60 이 310초) 지도 합계가 약 400 MB 를 넘지 않는 한 크게 묶는다.
+    chunk = max(1, int(400e6 // (len(angles) * h * w)))
+    for t0 in range(0, t_len, chunk):
+        sub = lum[t0:t0 + chunk]
+        n = len(sub)
+        cpd_max = np.zeros(sub.shape, np.float32)
+        ang_max = np.zeros(sub.shape, np.float32)
+        per_angle = []                                       # (각도, 그 방향에서 잰 cpd 지도)
+        for ang in angles:
+            mx, my, valid = maps[ang] if cache_maps else _scan_maps(h, w, ang)
+            prof = _sample(sub, mx, my, valid)               # n×Hc×Wc
+            hc, wc = prof.shape[1:]
+            runs, cpd = stripe_runs(prof.reshape(n * hc, wc), pixels_per_degree(w, h, ang), return_cpd=True)
+            runs = runs.reshape(n, hc, wc) & valid[None]
+            ti, ii, jj = np.nonzero(runs)
+            if not ti.size:
+                continue
+            cpd = cpd.reshape(n, hc, wc)
             ys = np.clip(np.round(my[ii, jj]).astype(int), 0, h - 1)
             xs = np.clip(np.round(mx[ii, jj]).astype(int), 0, w - 1)
-            mask[ti, ys, xs] = True
-            np.maximum.at(cpd_max, (ti, ys, xs), cpd[ti, ii, jj].astype(np.float32))
-    return mask & (cpd_max >= PATTERN_CPD[0]) & (cpd_max <= PATTERN_CPD[1])
+            mask[t0 + ti, ys, xs] = True
+            vals = cpd[ti, ii, jj].astype(np.float32)
+            here = np.zeros(sub.shape, np.float32)
+            np.maximum.at(here, (ti, ys, xs), vals)
+            better = here > cpd_max
+            cpd_max[better] = here[better]
+            ang_max[better] = ang
+            inr = (here >= lo) & (here <= hi)
+            if inr.any():
+                q = np.zeros(sub.shape, np.uint8)
+                q[inr] = np.clip(np.round(here[inr] * 16), 1, 255).astype(np.uint8)
+                per_angle.append((ang, q))
+            del here
+        ok = (cpd_max >= lo) & (cpd_max <= hi)
+        over = cpd_max > hi
+        if over.any():
+            for ang, q in per_angle:
+                here = q.astype(np.float32) / 16.0
+                proj = cpd_max * np.abs(np.cos(np.radians(ang - ang_max)))
+                ok |= over & (q > 0) & (here > PATTERN_CPD_ORIENT_MARGIN * proj)
+        out[t0:t0 + n] = mask[t0:t0 + n] & ok
+    return out
 
 
 def stripe_normal_angle(lum2d: np.ndarray, mask: np.ndarray) -> float:
@@ -905,10 +1009,9 @@ def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None =
     _check_input(frames_bgr, fps)
     if lum is None:
         lum = luminance_cd(frames_bgr)
-    if signed is None:
-        signed = pixel_transitions(lum)
+    # signed 는 호환용 인자(쓰지 않음). 2026-11-13 전에는 넘기지 않으면 쓰지도 않는 픽셀 전이를 계산했다.
     t_len = len(lum)
-    w = max(1, int(round(fps)))
+    w = window_frames(fps)
     stripes = stripe_masks(lum)
     area = stripes.mean(axis=(1, 2))
 
@@ -938,8 +1041,8 @@ def analyze_pattern(frames_bgr: np.ndarray, fps: float, lum: np.ndarray | None =
                      np.where(motion == "drifting", drift_limit, PATTERN_AREA_DYNAMIC))
     cand = area > limit
 
-    # ⑧ 지속: 1초 창 [s, s+W) 안의 후보 프레임 수 ≥ ceil(0.5·W)
-    need = int(np.ceil(PATTERN_MIN_SEC * w))
+    # ⑧ 지속: 1초 창 [s, s+W) 안의 후보 프레임 수 ≥ ceil(0.5·fps) (12.5 fps 에서 6프레임 = 0.48 초가 되지 않게 fps 로 잼)
+    need = max(1, int(np.ceil(PATTERN_MIN_SEC * fps - 1e-9)))
     cs = np.concatenate([[0], np.cumsum(cand)])
     starts = np.arange(t_len)
     counts = cs[np.minimum(starts + w, t_len)] - cs[:t_len]
@@ -1021,7 +1124,7 @@ def criteria_report(frames_bgr: np.ndarray, fps: float) -> list[dict]:
     if ever.any():
         sub = (signed[:, ever] != 0).astype(np.uint16)
         csum = np.vstack([np.zeros((1, sub.shape[1]), np.uint16), np.cumsum(sub, axis=0, dtype=np.uint16)])
-        win = int(round(fps))
+        win = window_frames(fps)
         t = len(lum)
         window = csum[np.minimum(np.arange(t) + win, t)] - csum[:t]
         pixel_flashes = float(window.max()) / 2.0

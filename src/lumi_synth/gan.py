@@ -90,7 +90,7 @@ def soft_judge(y: torch.Tensor, fps: float, *, tau_l: float = 0.02, tau_a: float
     new_up = e_up * (1 - F.pad(e_up[:, :-1], (1, 0)))
     new_dn = e_dn * (1 - F.pad(e_dn[:, :-1], (1, 0)))
     onset = torch.maximum(new_up, new_dn)                # D4: 같은 프레임 두 방향 = 1번
-    w = max(1, int(round(fps)))
+    w = measure.window_frames(fps)                       # 판정기와 같은 1초 창 (ceil)
     kernel = torch.ones(1, 1, w, device=y.device, dtype=onset.dtype)
     counts = F.conv1d(onset.unsqueeze(1), kernel, padding=w - 1).squeeze(1)
     soft_max = counts.amax(dim=1)
