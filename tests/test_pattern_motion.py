@@ -148,7 +148,9 @@ def test_drift_stripes_dangerous_by_default():
 
 def test_drift_stripes_flash_alone_is_dangerous_but_analyze_all_exempts(itu):
     v = stripes(area=0.55, motion="drift")
-    assert measure.analyze(v, FPS)["dangerous"] is True          # 휘도만 보면 위험 (각 픽셀이 주기적으로 깜빡임)
+    # 2026-11-14 (D3 = 20 ms): 흐름 2 px/프레임·주기 8 px 이면 한 프레임에 같은 방향으로 바뀌는 픽셀은 줄무늬 영역의
+    # 25% = 화면의 13.75% 라 휘도만 봐도 안전이다. 이전 D3(2프레임 합침)는 27.5% 로 합쳐 위험으로 봤다.
+    assert measure.analyze(v, FPS)["dangerous"] is False
     r = measure.analyze_all(v, FPS)
     assert r["pattern"]["dangerous"] is False                    # 줄무늬: 흐름 제외
     assert r["flash"]["dangerous"] is False                      # 휘도: 흐름 줄무늬 영역 제외

@@ -44,20 +44,27 @@ def test_d1_split_transition_counts_once(cycle, expected):
     assert one["max_flashes"] == split["max_flashes"] == expected
 
 
-def test_d3_two_partial_frames_are_concurrent():
-    # D3: 20% + 20% 가 연속 두 프레임에 나뉘면 동시(40%)로 본다. 3.75 Hz → 위험.
+@pytest.mark.parametrize("fps, cycle, merged", [(30, 4, False), (60, 8, True)])
+def test_d3_sync_window_is_20ms_of_real_time(fps, cycle, merged):
+    # D3 (2026-11-14): '동시' = 프레임 시각 차이 ≤ 20 ms. 20% + 20% 가 연속 두 프레임에 나뉜 3.75 Hz 깜빡임은
+    #   60 fps(16.7 ms 차이)에서는 40% 로 합쳐 위험, 30 fps(33 ms 차이)에서는 합치지 않아 각 20% < 25% → 전이 없음.
+    #   2026-11-09~11-14 구현(c = round(fps/15) 프레임)은 30 fps 에서도 합쳐 위험으로 봤다.
     m1, m2 = np.zeros((H, W), bool), np.zeros((H, W), bool)
     m1[:8], m2[8:16] = True, True
     cur, st, out = np.full((H, W), LO, np.uint8), LO, []
-    for t in range(60):
-        if t % 4 == 0 and t > 0:
+    for t in range(2 * fps):
+        if t % cycle == 0 and t > 0:
             st = HI if st == LO else LO
             cur[m1] = st
-        elif t % 4 == 1 and t > 1:
+        elif t % cycle == 1 and t > 1:
             cur[m2] = st
         out.append(np.repeat(cur[..., None], 3, 2).copy())
-    r = measure.analyze(np.stack(out), FPS)
-    assert r["dangerous"] and r["hazard_mask"].mean() == pytest.approx(0.4)
+    r = measure.analyze(np.stack(out), fps)
+    assert r["dangerous"] == merged
+    if merged:
+        assert r["hazard_mask"].mean() == pytest.approx(0.4)
+    else:
+        assert r["max_flashes"] == 0.0
 
 
 @pytest.mark.parametrize("period, flashes", [(3, 5.0), (5, 3.0)])
