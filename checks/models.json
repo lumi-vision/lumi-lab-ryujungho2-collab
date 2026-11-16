@@ -1,0 +1,1317 @@
+{
+ "generators": [
+  {
+   "kind": "G",
+   "name": "u_div0.05_s0.pt",
+   "path": "data\\gan\\u_div0.05_s0.pt",
+   "sha256": "c817655f2d3db4c6c3c4cca278fae17bde109f3ec51cd8d1a2df9b8e7ea886b4",
+   "made": "2026-11-11 00:08",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 0.05,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div0.05_s0.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div0.5_s0.pt",
+   "path": "data\\gan\\u_div0.5_s0.pt",
+   "sha256": "a48163fa536023912cf6945e17547aeec57867e4633a12c41b79cf86a3d61d94",
+   "made": "2026-11-11 00:23",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 0.5,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div0.5_s0.md",
+   "result": {
+    "목표 '위험' →": "47/48 (98%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div0.05_s1.pt",
+   "path": "data\\gan\\u_div0.05_s1.pt",
+   "sha256": "f78d2ece1c99b5cbe4a16dcbe2bb8546009a6e2ae56aaa9c0bd6c0491c3edbca",
+   "made": "2026-11-11 00:39",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 0.05,
+    "lambda_adv": 0.1,
+    "seed": 1,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div0.05_s1.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div0.5_s1.pt",
+   "path": "data\\gan\\u_div0.5_s1.pt",
+   "sha256": "7ef143cb4c88eed06446e6f55b6631cb3d63f7b02af4f65c01452b217f5522de",
+   "made": "2026-11-11 00:54",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 0.5,
+    "lambda_adv": 0.1,
+    "seed": 1,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div0.5_s1.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div0.05_s2.pt",
+   "path": "data\\gan\\u_div0.05_s2.pt",
+   "sha256": "2f46462d0f153cd8490f2af191a5aaccac6a78ba2df39ab22c9af83112e2558e",
+   "made": "2026-11-11 01:09",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 0.05,
+    "lambda_adv": 0.1,
+    "seed": 2,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div0.05_s2.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div0.5_s2.pt",
+   "path": "data\\gan\\u_div0.5_s2.pt",
+   "sha256": "25f72968e5dfe9eb23aed580285118b3b2172c4774eb94121e44b8dd858b2252",
+   "made": "2026-11-11 01:25",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 0.5,
+    "lambda_adv": 0.1,
+    "seed": 2,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div0.5_s2.md",
+   "result": {
+    "목표 '위험' →": "47/48 (98%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u2k_div0.05_s0.pt",
+   "path": "data\\gan\\u2k_div0.05_s0.pt",
+   "sha256": "334a636d785e93822f557b97c2bc350ae5f4b90f131a5f960c20a5e32fe494f4",
+   "made": "2026-11-11 06:25",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 2000,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 0.05,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u2k_div0.05_s0.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u2k_div0.5_s0.pt",
+   "path": "data\\gan\\u2k_div0.5_s0.pt",
+   "sha256": "30f18e60c8e6f7049d3853d4611d5977d3aac5014758cadb709d6db4a9e063e3",
+   "made": "2026-11-11 07:25",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 2000,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 0.5,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u2k_div0.5_s0.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "ufp32_div0.5_s0.pt",
+   "path": "data\\gan\\ufp32_div0.5_s0.pt",
+   "sha256": "25c40f9b6c91490052fe3a815baa4548aa7c6f351067aa28e612b6528a43db13",
+   "made": "2026-11-11 07:52",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 0.5,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\ufp32_div0.5_s0.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div2.0_s0.pt",
+   "path": "data\\gan\\u_div2.0_s0.pt",
+   "sha256": "451396de517df9d94071ee2a0fb0175bdefba086e5f7218cda4075edd82eba4a",
+   "made": "2026-11-11 08:19",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div5.0_s0.pt",
+   "path": "data\\gan\\u_div5.0_s0.pt",
+   "sha256": "c2699dde6a113d6eba788a7f7f6917ea1a839fcf0439481958061a6ae2e75b33",
+   "made": "2026-11-11 08:35",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 5.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div5.0_s0.md",
+   "result": {
+    "목표 '위험' →": "46/48 (96%)",
+    "목표 '근처 안전' → 안전 |": "41/48 (85%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div2.0_s1.pt",
+   "path": "data\\gan\\u_div2.0_s1.pt",
+   "sha256": "6cca94759fd0a378d1f27e8e0aae039afeed9118c45f39eabaebfbc586ad60f2",
+   "made": "2026-11-11 08:50",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 1,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div2.0_s1.md",
+   "result": {
+    "목표 '위험' →": "47/48 (98%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div5.0_s1.pt",
+   "path": "data\\gan\\u_div5.0_s1.pt",
+   "sha256": "49d3a944e716b47af8c544deb2ea3b972a258e3107500bda5e15e2dc0f5b9c86",
+   "made": "2026-11-11 09:05",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 5.0,
+    "lambda_adv": 0.1,
+    "seed": 1,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div5.0_s1.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "45/48 (94%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div2.0_s2.pt",
+   "path": "data\\gan\\u_div2.0_s2.pt",
+   "sha256": "b32c4d3bb1aba141a1ca87b65738e5d69bc46f4347046efddd9d5e3d9785d9c3",
+   "made": "2026-11-11 09:21",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 2,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div2.0_s2.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "u_div5.0_s2.pt",
+   "path": "data\\gan\\u_div5.0_s2.pt",
+   "sha256": "dc5a7b469d6aad54a716664640fb5a6d693ede798db868d054c53d963e5f17e0",
+   "made": "2026-11-11 09:36",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 5.0,
+    "lambda_adv": 0.1,
+    "seed": 2,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": null
+   },
+   "report": "checks\\gan\\u_div5.0_s2.md",
+   "result": {
+    "목표 '위험' →": "46/48 (96%)",
+    "목표 '근처 안전' → 안전 |": "45/48 (94%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "w_div2.0_2k_s0.pt",
+   "path": "data\\gan\\w_div2.0_2k_s0.pt",
+   "sha256": "6f61f747e78b92efff2e3922aff084e16c475f6f5d0e7bd7950e097a097b01da",
+   "made": "2026-11-14 17:51",
+   "hazard": "lum",
+   "variant": "v1",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 2000,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)",
+     "note": "학습 뒤에 적음"
+    }
+   },
+   "report": "checks\\gan\\w_div2.0_2k_s0.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "r_div2.0_s0.pt",
+   "path": "data\\gan\\r_div2.0_s0.pt",
+   "sha256": "38886993ab48a7673ca54638392350a07c6cf82cf598918fe9222896186353b5",
+   "made": "2026-11-14 18:18",
+   "hazard": "red",
+   "variant": "v1 장면↔같은 휘도 빨강",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\r_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "42/48 (88%)",
+    "목표 '근처 안전' → 안전이면서": "29/48 (60%)",
+    "목표 '근처 안전' → 안전 |": "46/48 (96%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "s_div2.0_s0.pt",
+   "path": "data\\gan\\s_div2.0_s0.pt",
+   "sha256": "6c9924538d726081953b50b44e485a9812c8bf0bbb00c2d6d01272f691d0fbd0",
+   "made": "2026-11-14 18:31",
+   "hazard": "stripe",
+   "variant": "v1 조건을 G 가 고름(정지·흐름)",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\s_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전이면서": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "r_crisp2_div2.0_s0.pt",
+   "path": "data\\gan\\r_crisp2_div2.0_s0.pt",
+   "sha256": "74ff8a63b245bc760b61838bc788594cf3ec88572064bd20f2da9cc289f29cb7",
+   "made": "2026-11-14 19:10",
+   "hazard": "red",
+   "variant": "v1 장면↔같은 휘도 빨강, 또렷함 λ 2.0",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\r_crisp2_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "45/48 (94%)",
+    "목표 '근처 안전' → 안전이면서": "36/48 (75%)",
+    "목표 '근처 안전' → 안전 |": "46/48 (96%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "r2_crisp2_div2.0_s0.pt",
+   "path": "data\\gan\\r2_crisp2_div2.0_s0.pt",
+   "sha256": "bcec8def762eea6fe8aa3102ac4726dc23cfd3ff6932cdefd4a1de2858c9121c",
+   "made": "2026-11-14 21:13",
+   "hazard": "red",
+   "variant": "v2 색 조건을 G 가 고름, 또렷함 λ 2.0",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\r2_crisp2_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "43/48 (90%)",
+    "목표 '근처 안전' → 안전이면서": "33/48 (69%)",
+    "목표 '근처 안전' → 안전 |": "39/48 (81%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "r3z_crisp2_div2.0_s0.pt",
+   "path": "data\\gan\\r3z_crisp2_div2.0_s0.pt",
+   "sha256": "8a510f1a44dba3bc1155cfaa7b97492819bebdc0a15aff248bda257d471df281",
+   "made": "2026-11-14 21:42",
+   "hazard": "red",
+   "variant": "v3 색 조건 무작위, 또렷함 λ 2.0",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 12,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\r3z_crisp2_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "37/48 (77%)",
+    "목표 '근처 안전' → 안전이면서": "25/48 (52%)",
+    "목표 '근처 안전' → 안전 |": "40/48 (83%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "r4z2_crisp2_div2.0_s0.pt",
+   "path": "data\\gan\\r4z2_crisp2_div2.0_s0.pt",
+   "sha256": "457bd5235adc075b0f5d6bd1a0ef6688af171c7f96fb0c34e7d523fbc9af8dcc",
+   "made": "2026-11-14 23:34",
+   "hazard": "red",
+   "variant": "v4 색 조건 무작위 + 등휘도, 또렷함 λ 2.0",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 12,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\r4z2_crisp2_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "28/48 (58%)",
+    "목표 '근처 안전' → 안전이면서": "15/48 (31%)",
+    "목표 '근처 안전' → 안전 |": "35/48 (73%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "w2s_div2.0_1k_s0.pt",
+   "path": "data\\gan\\w2s_div2.0_1k_s0.pt",
+   "sha256": "40293815625ce80bece13da7f8bc625a8dffe07293ff76e16d6279cad169895a",
+   "made": "2026-11-15 04:03",
+   "hazard": "lum",
+   "variant": "v2 파형 흐림 무작위",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 1000,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\w2s_div2.0_1k_s0.md",
+   "result": {
+    "목표 '위험' →": "39/48 (81%)",
+    "목표 '근처 안전' → 안전이면서": "42/48 (88%)",
+    "목표 '근처 안전' → 안전 |": "44/48 (92%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "s2z_div2.0_s0.pt",
+   "path": "data\\gan\\s2z_div2.0_s0.pt",
+   "sha256": "8ffb5492d0895006d95261a9b27bd84bc6229610be11a040768f34d354bcd1b1",
+   "made": "2026-11-15 08:49",
+   "hazard": "stripe",
+   "variant": "v2 조건 무작위(정지·반전·흐름)",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 8,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\s2z_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전이면서": "45/48 (94%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "s3z2_div2.0_s0.pt",
+   "path": "data\\gan\\s3z2_div2.0_s0.pt",
+   "sha256": "3d2d2fef2ec396351ce8096ec86abb8c82939e1714a2b3c350cac1fdade3bcb5",
+   "made": "2026-11-15 17:23",
+   "hazard": "stripe",
+   "variant": "v1 조건을 G 가 고름(정지·흐름)",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 10,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\s3z2_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전이면서": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "s4dc_from_s3z2.pt",
+   "path": "data\\gan\\s4dc_from_s3z2.pt",
+   "sha256": "1e68acb02d82c4981d740b1930736fe57c821357461cacc525218a86e74838ab",
+   "made": "2026-11-16 01:45",
+   "hazard": "stripe",
+   "variant": "v1 조건을 G 가 고름(정지·흐름)",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 10,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\s4dc_from_s3z2.md",
+   "result": {
+    "목표 '위험' →": "48/48 (100%)",
+    "목표 '근처 안전' → 안전이면서": "48/48 (100%)",
+    "목표 '근처 안전' → 안전 |": "48/48 (100%)"
+   }
+  },
+  {
+   "kind": "G",
+   "name": "s5pat_div2.0_s0.pt",
+   "path": "data\\gan\\s5pat_div2.0_s0.pt",
+   "sha256": "a48eb377f49d2a937c49bc9d1f1d8cca759242ee9a280e8c9c1c9a08d3991f40",
+   "made": "2026-11-16 21:21",
+   "hazard": "stripe",
+   "variant": "v1 조건을 G 가 고름(정지·흐름)",
+   "train": {
+    "data": "oracle_768x432_24fps backgrounds_train (영화 60클립)",
+    "steps": 500,
+    "batch": 4,
+    "width": 16,
+    "zdim": 14,
+    "lambda_div": 2.0,
+    "lambda_adv": 0.1,
+    "seed": 0,
+    "train_hw": [
+     432,
+     768
+    ],
+    "fps": 24.0,
+    "judge_rule": {
+     "d3_sync_ms": 20.0,
+     "window_1s": "ceil(fps)"
+    }
+   },
+   "report": "checks\\gan\\s5pat_div2.0_s0.md",
+   "result": {
+    "목표 '위험' →": "41/48 (85%)",
+    "목표 '근처 안전' → 안전이면서": "44/48 (92%)",
+    "목표 '근처 안전' → 안전 |": "47/48 (98%)"
+   }
+  }
+ ],
+ "gdr": [
+  {
+   "kind": "보정기",
+   "name": "v1/cor_a.pt",
+   "path": "data\\gdr\\v1\\cor_a.pt",
+   "sha256": "82ae4e900ab91c10b331c77c4b123a13d136664501992143e57bc1a3eae959dd",
+   "made": "2026-11-14 20:17",
+   "train": {
+    "data": "data/gdr/v1/train (251개)",
+    "sources": "G `r_crisp2_div2.0_s0.pt` (sha256 74ff8a63b245) · G `w_div2.0_2k_s0.pt` (sha256 6f61f747e78b) · 없음 (바탕 그대로)",
+    "epochs": "6/6",
+    "width": 32,
+    "lr": 0.001,
+    "batch": null,
+    "seed": 0
+   },
+   "how": "목표 = 원본, 입력 = 영상 + 판정기 튜브(부드럽게), 조각 [256, 384], 시간 손실 λ 1.0",
+   "reports": [
+    "checks\\gdr\\v1_cor_a_val.md",
+    "checks\\gdr\\v1_cor_a_val_rule.md"
+   ]
+  },
+  {
+   "kind": "보정기",
+   "name": "v1/cor_b.pt",
+   "path": "data\\gdr\\v1\\cor_b.pt",
+   "sha256": "35fdc5f87aae5e79178320d3e1d4c60821cb2f68917022dd4afd8597bcf70e4e",
+   "made": "2026-11-14 20:43",
+   "train": {
+    "data": "data/gdr/v1/train (251개)",
+    "sources": "G `r_crisp2_div2.0_s0.pt` (sha256 74ff8a63b245) · G `w_div2.0_2k_s0.pt` (sha256 6f61f747e78b) · 없음 (바탕 그대로)",
+    "epochs": "30/30",
+    "width": 32,
+    "lr": 0.001,
+    "batch": null,
+    "seed": 0
+   },
+   "how": "목표 = 원본, 입력 = 영상 + 판정기 튜브(부드럽게), 조각 [256, 384], 시간 손실 λ 2.0",
+   "reports": [
+    "checks\\gdr\\v1_cor_b_val.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v1/roi_a.pt",
+   "path": "data\\gdr\\v1\\roi_a.pt",
+   "sha256": "8c102920cc03b16ec16c599e427360d70021ac36380e25317933ca73ef2379ad",
+   "made": "2026-11-14 20:14",
+   "train": {
+    "data": "data/gdr/v1/train (540개)",
+    "sources": "G `r_crisp2_div2.0_s0.pt` (sha256 74ff8a63b245) · G `w_div2.0_2k_s0.pt` (sha256 6f61f747e78b) · 없음 (바탕 그대로)",
+    "epochs": "8/8",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 rgb",
+   "reports": [
+    "checks\\gdr\\v1_roi_a_val.md",
+    "checks\\gdr\\v1_roi_a_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v2/roi_a.pt",
+   "path": "data\\gdr\\v2\\roi_a.pt",
+   "sha256": "d04f1c31754773df0898a0d6caeeb0d15de90a474170ee041cd1a80e45f6fa9c",
+   "made": "2026-11-14 22:18",
+   "train": {
+    "data": "data/gdr/v2/train (540개)",
+    "sources": "G `r3z_crisp2_div2.0_s0.pt` (sha256 8a510f1a44db) · G `w_div2.0_2k_s0.pt` (sha256 6f61f747e78b) · 없음 (바탕 그대로)",
+    "epochs": "8/8",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 rgb",
+   "reports": [
+    "checks\\gdr\\v2_roi_a_val.md",
+    "checks\\gdr\\v2_roi_a_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v3/roi_a.pt",
+   "path": "data\\gdr\\v3\\roi_a.pt",
+   "sha256": "2bc00af615960f5f4d55a13fa42f2c597f9a394495a9d0b70b14b3ce87bdaea9",
+   "made": "2026-11-14 23:11",
+   "train": {
+    "data": "data/gdr/v3/train (1020개)",
+    "sources": "G `r3z_crisp2_div2.0_s0.pt` (sha256 8a510f1a44db) · G `w_div2.0_2k_s0.pt` (sha256 6f61f747e78b) · 없음 (바탕 그대로)",
+    "epochs": "10/10",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 rgb",
+   "reports": [
+    "checks\\gdr\\v3_roi_a_val.md",
+    "checks\\gdr\\v3_roi_a_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v4/roi_a.pt",
+   "path": "data\\gdr\\v4\\roi_a.pt",
+   "sha256": "d2f949a1bdd6b9b0d0d3ffedac299293b2e46e6c959295d6ffc5ae081997a861",
+   "made": "2026-11-15 00:43",
+   "train": {
+    "data": "data/gdr/v4/train (1020개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `w_div2.0_2k_s0.pt` (sha256 6f61f747e78b) · 없음 (바탕 그대로)",
+    "epochs": "10/10",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 rgb",
+   "reports": [
+    "checks\\gdr\\v4_roi_a_val.md",
+    "checks\\gdr\\v4_roi_a_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v4/roi_b.pt",
+   "path": "data\\gdr\\v4\\roi_b.pt",
+   "sha256": "b78cd68059342a6efee1592161cbecbf6fa3fd6114acb26a57e33da8ffb1eee1",
+   "made": "2026-11-15 02:09",
+   "train": {
+    "data": "data/gdr/v4/train (1020개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `w_div2.0_2k_s0.pt` (sha256 6f61f747e78b) · 없음 (바탕 그대로)",
+    "epochs": "10/10",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color",
+   "reports": [
+    "checks\\gdr\\v4_roi_b_val.md",
+    "checks\\gdr\\v4_roi_b_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v4/roi_c.pt",
+   "path": "data\\gdr\\v4\\roi_c.pt",
+   "sha256": "ad6f6cc247f87c5c3106f8e12e71095dce016037d641e11f8ac11074293784a5",
+   "made": "2026-11-15 03:29",
+   "train": {
+    "data": "data/gdr/v4/train (1020개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `w_div2.0_2k_s0.pt` (sha256 6f61f747e78b) · 없음 (바탕 그대로)",
+    "epochs": "10/10",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color2",
+   "reports": [
+    "checks\\gdr\\v4_roi_c_val.md",
+    "checks\\gdr\\v4_roi_c_val_rule.md"
+   ]
+  },
+  {
+   "kind": "보정기",
+   "name": "v5/cor_b.pt",
+   "path": "data\\gdr\\v5\\cor_b.pt",
+   "sha256": "0b9095c7df8a3d8a4b98cefff0784452eaf21556b0b7568dee9994e58064c505",
+   "made": "2026-11-15 06:19",
+   "train": {
+    "data": "data/gdr/v5/train (515개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "15/15",
+    "width": 32,
+    "lr": 0.001,
+    "batch": null,
+    "seed": 0
+   },
+   "how": "목표 = 원본, 입력 = 영상 + 판정기 튜브(부드럽게), 조각 [256, 384], 시간 손실 λ 2.0",
+   "reports": [
+    "checks\\gdr\\v5_cor_b_val.md",
+    "checks\\gdr\\v5_cor_b_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v5/roi_c.pt",
+   "path": "data\\gdr\\v5\\roi_c.pt",
+   "sha256": "a009f8ea70fd9932deaf972e93d0816cce7258e6dfba423eca83c20e8b8ce8db",
+   "made": "2026-11-15 06:07",
+   "train": {
+    "data": "data/gdr/v5/train (1260개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "10/10",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color2",
+   "reports": [
+    "checks\\gdr\\v5_roi_c_s1_val.md",
+    "checks\\gdr\\v5_roi_c_s1_val_rule.md",
+    "checks\\gdr\\v5_roi_c_val.md",
+    "checks\\gdr\\v5_roi_c_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v5/roi_c_s1.pt",
+   "path": "data\\gdr\\v5\\roi_c_s1.pt",
+   "sha256": "91e5f2753848433aa8bbe56dc32d7e92b313dd248d4904b55532ad5af3d8299b",
+   "made": "2026-11-16 07:30",
+   "train": {
+    "data": "data/gdr/v5/train (1260개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "10/10",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 1
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color2",
+   "reports": [
+    "checks\\gdr\\v5_roi_c_s1_val.md",
+    "checks\\gdr\\v5_roi_c_s1_val_rule.md"
+   ]
+  },
+  {
+   "kind": "보정기",
+   "name": "v6/cor_b.pt",
+   "path": "data\\gdr\\v6\\cor_b.pt",
+   "sha256": "37a47e8a5fe2280244d830c5d893ae81506f2618ee3013ea4239b3525503185f",
+   "made": "2026-11-15 14:05",
+   "train": {
+    "data": "data/gdr/v6/train (814개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "15/15",
+    "width": 32,
+    "lr": 0.001,
+    "batch": null,
+    "seed": 0
+   },
+   "how": "목표 = 원본, 입력 = 영상 + 판정기 튜브(부드럽게), 조각 [256, 384], 시간 손실 λ 2.0",
+   "reports": [
+    "checks\\gdr\\v6_cor_b_val.md",
+    "checks\\gdr\\v6_cor_b_val_rule.md",
+    "checks\\gdr\\v6_pipeline_val.md",
+    "checks\\gdr\\v6_pipeline_val_rule.md"
+   ]
+  },
+  {
+   "kind": "보정기",
+   "name": "v6/cor_e0.pt",
+   "path": "data\\gdr\\v6\\cor_e0.pt",
+   "sha256": "7078e264e7b4b687f2945d55f04993f6fef384d80bda430bc08a0b633dc2ca1a",
+   "made": "2026-11-15 20:47",
+   "train": {
+    "data": "data/gdr/v6/train (814개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "15/15",
+    "width": 32,
+    "lr": 0.001,
+    "batch": null,
+    "seed": 0
+   },
+   "how": "목표 = 원본, 입력 = 영상 + 화면 전체(E0, 마스크 없음), 조각 [256, 384], 시간 손실 λ 2.0",
+   "reports": [
+    "checks\\gdr\\v6_pipeline_val.md",
+    "checks\\gdr\\v6_pipeline_val_rule.md"
+   ]
+  },
+  {
+   "kind": "보정기",
+   "name": "v6/cor_e3.pt",
+   "path": "data\\gdr\\v6\\cor_e3.pt",
+   "sha256": "2b9b2c0b2b7e148f5713abeac33824607fd20136591f9851dd84ef96380e77c5",
+   "made": "2026-11-15 21:04",
+   "train": {
+    "data": "data/gdr/v6/train (814개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "15/15",
+    "width": 32,
+    "lr": 0.001,
+    "batch": null,
+    "seed": 0
+   },
+   "how": "목표 = 원본, 입력 = 영상 + 판정기 튜브(부드럽게) + 정보 손실 지도(E3), 조각 [256, 384], 시간 손실 λ 2.0",
+   "reports": [
+    "checks\\gdr\\v6_pipeline_val.md",
+    "checks\\gdr\\v6_pipeline_val_rule.md"
+   ]
+  },
+  {
+   "kind": "손실 추정기",
+   "name": "v6/loss_c.pt",
+   "path": "data\\gdr\\v6\\loss_c.pt",
+   "sha256": "df9979b81cdb064e9e9f2a8fae2099ac89c6766ef606a8672edcd77a503afb18",
+   "made": "2026-11-15 20:30",
+   "train": {
+    "data": "data/gdr/v6/train (1740개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "8/8",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = α ≥ 0.95 (M_loss), 입력 특징 color2",
+   "reports": []
+  },
+  {
+   "kind": "탐지기",
+   "name": "v6/roi_c.pt",
+   "path": "data\\gdr\\v6\\roi_c.pt",
+   "sha256": "4f42b4a8a578bcc669098b707854de88f10651996f5a584fc5dd9fb11bc251d3",
+   "made": "2026-11-15 13:46",
+   "train": {
+    "data": "data/gdr/v6/train (1740개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "10/10",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color2",
+   "reports": [
+    "checks\\gdr\\v6_roi_c_val.md",
+    "checks\\gdr\\v6_roi_c_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v7/roi_c.pt",
+   "path": "data\\gdr\\v7\\roi_c.pt",
+   "sha256": "985bb6dba718d4efdaeee2b0fb0f425aea92f55ced370bcf0c6f959ae026af4d",
+   "made": "2026-11-16 00:24",
+   "train": {
+    "data": "data/gdr/v7/train (2220개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `s3z2_div2.0_s0.pt` (sha256 3d2d2fef2ec3) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "8/8",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color2",
+   "reports": [
+    "checks\\gdr\\v7_roi_c_clip_rule.md",
+    "checks\\gdr\\v7_roi_c_red2_val.md",
+    "checks\\gdr\\v7_roi_c_red2_val_rule.md",
+    "checks\\gdr\\v7_roi_c_s1_clip_rule.md",
+    "checks\\gdr\\v7_roi_c_s1_val.md",
+    "checks\\gdr\\v7_roi_c_s1_val_rule.md",
+    "checks\\gdr\\v7_roi_c_val.md",
+    "checks\\gdr\\v7_roi_c_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v7/roi_c_red2.pt",
+   "path": "data\\gdr\\v7\\roi_c_red2.pt",
+   "sha256": "26d3a367b70634fe977630d8556b3e2c69bb1c1b0caac162ae505995d1518028",
+   "made": "2026-11-16 11:00",
+   "train": {
+    "data": "data/gdr/v7/train (2439개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `s3z2_div2.0_s0.pt` (sha256 3d2d2fef2ec3) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "8/8",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color2",
+   "reports": [
+    "checks\\gdr\\v7_roi_c_red2_val.md",
+    "checks\\gdr\\v7_roi_c_red2_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v7/roi_c_s1.pt",
+   "path": "data\\gdr\\v7\\roi_c_s1.pt",
+   "sha256": "1b582387ca28fd5b7fb25eed48fc0c13939e2f2477ad31a6171747f095f16bd9",
+   "made": "2026-11-16 16:39",
+   "train": {
+    "data": "data/gdr/v7/train (2220개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `s3z2_div2.0_s0.pt` (sha256 3d2d2fef2ec3) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "8/8",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 1
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color2",
+   "reports": [
+    "checks\\gdr\\v7_roi_c_s1_clip_rule.md",
+    "checks\\gdr\\v7_roi_c_s1_val.md",
+    "checks\\gdr\\v7_roi_c_s1_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v8/roi_c.pt",
+   "path": "data\\gdr\\v8\\roi_c.pt",
+   "sha256": "cd5fb17bbf5e493c6c1934ad879de61787ee6ec82dcae14532ec57fe98cff78d",
+   "made": "2026-11-16 05:42",
+   "train": {
+    "data": "data/gdr/v8/train (2220개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `s4dc_from_s3z2.pt` (sha256 1e68acb02d82) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "8/8",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 0
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color2",
+   "reports": [
+    "checks\\gdr\\v8_roi_c_clip_rule.md",
+    "checks\\gdr\\v8_roi_c_s1_clip_rule.md",
+    "checks\\gdr\\v8_roi_c_s1_val.md",
+    "checks\\gdr\\v8_roi_c_s1_val_rule.md",
+    "checks\\gdr\\v8_roi_c_val.md",
+    "checks\\gdr\\v8_roi_c_val_rule.md"
+   ]
+  },
+  {
+   "kind": "탐지기",
+   "name": "v8/roi_c_s1.pt",
+   "path": "data\\gdr\\v8\\roi_c_s1.pt",
+   "sha256": "505f8796a0d4ada7a2dc887498e1ca7f34feae033973bf5b299065104c0ff5c5",
+   "made": "2026-11-16 13:25",
+   "train": {
+    "data": "data/gdr/v8/train (2220개)",
+    "sources": "G `r4z2_crisp2_div2.0_s0.pt` (sha256 457bd5235adc) · G `s2z_div2.0_s0.pt` (sha256 8ffb5492d089) · G `s4dc_from_s3z2.pt` (sha256 1e68acb02d82) · G `w2s_div2.0_1k_s0.pt` (sha256 40293815625c) · 없음 (바탕 그대로)",
+    "epochs": "8/8",
+    "width": 32,
+    "lr": 0.002,
+    "batch": 2,
+    "seed": 1
+   },
+   "how": "목표 = 판정기 튜브(휘도·적색·줄무늬), 입력 특징 color2",
+   "reports": [
+    "checks\\gdr\\v8_roi_c_s1_clip_rule.md",
+    "checks\\gdr\\v8_roi_c_s1_val.md",
+    "checks\\gdr\\v8_roi_c_s1_val_rule.md"
+   ]
+  }
+ ]
+}

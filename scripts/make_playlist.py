@@ -11,7 +11,12 @@
     python scripts\\make_playlist.py --groups oracle --limit 5 # 묶음 하나, 5개만
     python scripts\\make_playlist.py --extra D:\\videos         # 폴더 안 gif/mp4/avi/mkv/mov/npz 추가
     python scripts\\make_playlist.py --no-detect               # 판정 없이 변환만 (빠름)
+    python scripts\\make_playlist.py --serve                   # 로컬 서버: 파일·폴더 열기 + '생성…'(그 자리에서 만들어 보기)
 결과: data/playlist/index.html 을 더블클릭해서 연다. 이미 만든 클립은 건너뛴다(--force 로 다시 만듦).
+
+생성 (서버 모드, 2026-11-14): 페이지의 '생성…' 에서 종류(GAN · 규칙 휘도 · 규칙 적색 · 규칙 줄무늬 · 섞어서),
+목표(위험 / 근처 안전), 바탕, 영역, 시드를 고르면 lumi_synth.generate 가 영상을 만들고(data/playlist/generated/*.npz),
+같은 판정·네 칸 변환을 거쳐 목록에 넣는다. 정답 칸 = 생성 의도(판정 결과 아님).
 
 묶음(--groups)
     oracle      data/oracle_128x72_24fps 의 합성 휘도 깜빡임 352개 (정답: manifest·npz)
@@ -41,13 +46,14 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from lumi_synth import measure, oracle, stripe_freq as sf  # noqa: E402
+from lumi_synth import generate as gen, measure, oracle, stripe_freq as sf  # noqa: E402
+from lumi_synth import generation_workspace as workspace  # noqa: E402
 
 VIDEO_EXT = {".gif", ".mp4", ".avi", ".mkv", ".mov", ".m4v", ".webm"}
 DEFAULT_GROUPS = "oracle,gan,backgrounds,demo,sweep"   # 'old'(datasets/)는 11-13 에 지워서 기본에서 뺌
 PANEL_H = 240                     # 한 칸 높이(px). 작은 영상은 정수배 최근접 확대, 큰 영상은 축소
 GAP = 4                           # 칸 사이 간격(px)
-FORMAT_VERSION = "2"              # 출력 형식이 바뀌면 올려서 캐시를 무효화 (2: 넷째 칸 줄무늬 주파수 탐지기)
+FORMAT_VERSION = "3"              # v3: 생성 의도와 라벨 분리, 원본 비교
 
 # 겹쳐 칠할 색 (BGR)
 COL_GT = np.array([80, 200, 60], np.float32)      # 정답: 초록
@@ -259,6 +265,7 @@ def npz_items(p: Path, group: str, prefix: str, fps: float | None) -> list[Item]
         info = {k: (z[k].shape, z[k].dtype) for k in files}
         npz_fps = float(z["fps"]) if "fps" in files and z["fps"].shape == () else None
         hz_any = bool(z["hazard_frames"].any()) if "hazard_frames" in files else None
+        intent = bool(z["intent_hazard"]) if "intent_hazard" in files else None
     use_fps = fps or npz_fps or 24.0
     fps_note = {} if (fps or npz_fps) else {"fps": "24 (가정: 파일에 fps 없음)"}
     region_key = next((k for k in REGION_KEYS if k in files), None)
@@ -280,14 +287,19 @@ def npz_items(p: Path, group: str, prefix: str, fps: float | None) -> list[Item]
                             gt[dst] = z[src]
                     if region_key:
                         gt["region"] = z[region_key] > 0
+                    if "clean" in z and z["clean"].shape == frames.shape:
+                        gt["clean"] = z["clean"]
                 return frames, use_fps, gt
             tag = key if i is None else f"{key}[{i}]"
-            label = hz_any if synth else None
+            label = (intent if intent is not None else hz_any) if synth else None
             note = ("라벨: 같은 npz 의 hazard_frames" if label is not None
                     else "합성 전 원본 · 정답 없음" if key == "clean" else "정답 없음")
+            if synth and intent is not None:
+                note = "생성 의도 (판정 정답 아님) · 일치 여부만 비교"
             out.append(Item(id=f"{prefix}__{key}{'' if i is None else f'_{i:03d}'}", group=group,
                             title=f"{p.name} : {tag}", source=p, load=load, label=label, label_note=note,
-                            meta={"npz 키": tag, "모양": "×".join(map(str, shape))}, sub=f"{key}:{i}"))
+                            meta={"npz 키": tag, "모양": "×".join(map(str, shape)),
+                                  "label_source": "intent" if synth and intent is not None else "reference"}, sub=f"{key}:{i}"))
     return out
 
 
@@ -305,6 +317,21 @@ def file_items(p: Path, group: str, prefix: str, max_seconds: float, max_side: i
             return fr, (fps or f), {"note": note}
         return [Item(id=prefix, group=group, title=p.name, source=p, load=load, label=None, label_note="정답 없음")]
     return []
+
+
+def generated_item(recipe: dict, gen_dir: Path) -> Item:
+    """레시피(lumi_synth.generate)대로 영상을 만들어 npz 로 저장하고 플레이어 항목으로 돌려준다.
+
+    생성 의도(위험 / 근처 안전)를 실제 판정과 비교한다. 의도는 정답이 아니다. 그래서 목록의
+    맞힘·놓침·오탐은 '판정기가 생성 의도와 같은 답을 냈는가'를 뜻한다(GAN 이 목표를 맞췄는지 보는 용도)."""
+    res = gen.make(recipe, gen_dir)
+    exp, mask, frames, fps = res["expected"], res["mask"], res["flicker"], res["fps"]
+    gt = {"region": res["mask_changed"], "clean": res["clean"]}
+    meta = {k: v for k, v in {**recipe, **res["detail"]}.items() if k not in ("id", "group")}
+    meta["label_source"] = "intent"
+    return Item(id=recipe["id"], group=recipe["group"], title=gen.describe(recipe), source=res["path"],
+                load=lambda: (frames, fps, dict(gt)), label=exp,
+                label_note=f"생성 의도({'위험' if exp else '근처 안전'}) · 판정 정답 아님 · 둘째 칸은 원본과 실제 변경 영역", meta=meta)
 
 
 def _slug(s: str) -> str:
@@ -410,7 +437,7 @@ def _tint(img: np.ndarray, mask, color: np.ndarray, a: float) -> None:
 
 
 def _label(img: np.ndarray, text: str) -> np.ndarray:
-    img = (img * 0.35).astype(np.float32)
+    img = np.clip(img * 0.35, 0, 255).astype(np.uint8)
     h, w = img.shape[:2]
     s = max(0.3, w / 400)
     (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, s, 1)
@@ -434,7 +461,7 @@ def compose(frames: np.ndarray, gt: dict, label: bool | None, det: tuple | None)
     gt_frames = gt.get("hz_frames")
     for t in range(t_len):
         base = frames[t].astype(np.float32)
-        p2 = base.copy()
+        p2 = gt["clean"][t].astype(np.float32) if gt.get("clean") is not None else base.copy()
         if has_gt:
             _tint(p2, _at(gt.get("region"), t), COL_GT, 0.22)
             if gt_frames is not None and bool(gt_frames[t]):
@@ -554,6 +581,13 @@ def process_item(it: Item, out: Path, detect_on: bool, det_hash: str, force: boo
     series = det[1] if det else {}
     if gt.get("hz_frames") is not None:
         series = {**series, "gt_hz": np.asarray(gt["hz_frames"], bool)}
+    if it.meta.get("label_source") == "intent" and det is not None:
+        # 생성 의도를 위험 마스크로 저장하지 않는다. 판정 산출물에는 판정 모드·버전을 함께 남긴다.
+        np.savez_compressed(out / "cache" / f"{it.id}.judgement.npz",
+                            detector_hash=np.array(det_hash), fast=np.bool_(fast), fps=np.float64(fps),
+                            dangerous=np.bool_(det[0]["dangerous"]),
+                            **{k: v for k, v in det[1].items() if k.endswith("_hz")},
+                            **{k: v for k, v in det[2].items() if k != "blocks"})
     rec = _jsonable({
         "key": key, "id": it.id, "group": it.group, "title": it.title,
         "source": str(it.source.relative_to(ROOT)) if it.source.is_relative_to(ROOT) else str(it.source),
@@ -592,18 +626,111 @@ def serve(args, det_hash: str) -> int:
 
     def worker() -> None:                      # 한 번에 한 클립씩 (판정이 CPU 를 많이 씀)
         while True:
-            job_id, it, detect_on, fast = work.get()
+            job_id, item_id, it, detect_on, fast = work.get()
             try:
-                rec, _ = process_item(it, out, detect_on, det_hash, force=False, fast=fast)
+                if callable(it):               # 생성 요청: 여기서 영상을 만든 뒤 판정한다 (GPU 도 한 번에 하나)
+                    it = it()
+                if jobs[job_id].get("generation_only"):
+                    frames, fps, _ = it.load()
+                    video = it.source.with_suffix(".mkv")
+                    workspace.write_lossless_video(video, frames, fps)
+                    rec = {"id": it.id, "title": it.title, "source": str(it.source),
+                           "movie": str(video), "original": it.meta.get("source"),
+                           "fps": fps, "n": len(frames), "outcome": "not_run", "det_sec": 0,
+                           "checkpoint": it.meta.get("checkpoint"), "intent": it.label,
+                           "inference_device": it.meta.get("inference_device"),
+                           "made": time.strftime("%Y-%m-%d %H:%M:%S")}
+                    it.source.with_suffix(".result.json").write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+                else:
+                    rec, _ = process_item(it, out, detect_on, det_hash, force=False, fast=fast)
                 with lock:
-                    jobs[job_id]["records"][it.id] = rec
-                print(f"  {it.id}: {rec['outcome']} ({rec['det_sec']}s)", flush=True)
+                    jobs[job_id]["records"][item_id] = rec
+                print(f"  {item_id}: {rec['outcome']} ({rec['det_sec']}s)", flush=True)
             except Exception as e:
                 with lock:
-                    jobs[job_id]["errors"][it.id] = f"{type(e).__name__}: {e}"
-                print(f"  {it.id}: 실패 {type(e).__name__}: {e}", flush=True)
+                    jobs[job_id]["errors"][item_id] = f"{type(e).__name__}: {e}"
+                print(f"  {item_id}: 실패 {type(e).__name__}: {e}", flush=True)
 
     threading.Thread(target=worker, daemon=True).start()
+    gen_dir = out / "generated"
+
+    def start_generate(body: dict, detect_on: bool, fast: bool) -> dict:
+        """생성 요청 → 레시피 count 개 → 작업 줄에 넣는다(영상은 worker 가 하나씩 만든다)."""
+        import secrets as _secrets
+
+        def num(key, lo, hi, cast=float):
+            v = body.get(key)
+            if v is None or v == "":
+                return None
+            v = cast(v)
+            if not lo <= v <= hi:
+                raise ValueError(f"{key} 는 {lo}~{hi}: {v}")
+            return v
+        try:
+            kind, intent = str(body.get("kind", "mix")), str(body.get("intent", "both"))
+            if kind not in gen.KINDS + ("mix",):
+                raise ValueError(f"모르는 종류: {kind}")
+            if intent not in gen.INTENTS + ("both",):
+                raise ValueError(f"모르는 목표: {intent}")
+            source = str(body.get("source") or "").strip()
+            if source:
+                source = str(Path(source).expanduser().resolve())
+                if not Path(source).is_file() or Path(source).suffix.lower() not in VIDEO_EXT - {".gif"}:
+                    raise ValueError("합성 원본은 존재하는 동영상 파일 경로여야 합니다 (GIF 제외)")
+            counts = gen.background_counts()
+            split = str(body.get("split") or next(iter(counts), ""))
+            if not source and split not in counts:
+                raise ValueError(f"바탕이 없습니다: {gen.TRACK.name}/backgrounds_{split}.npz (make_oracle_dataset.py 로 만듦)")
+            count = num("count", 1, 16, int) or 4
+            bg = num("bg", 0, counts[split] - 1, int) if not source else 0
+            seed = num("seed", 0, 2 ** 31 - 1, int)
+            if seed is None:
+                seed = _secrets.randbelow(2 ** 31 - 1)
+            ck = str(body.get("checkpoint") or "") or None
+            if ck is not None and not (gen.GAN_DIR / Path(ck).name).is_file():
+                raise ValueError(f"체크포인트가 없습니다: {ck}")
+            ck = Path(ck).name if ck else None
+            if kind == "gan" and ck is None:
+                raise ValueError("GAN 생성에는 체크포인트가 필요합니다 (scripts/train_gan.py 로 학습)")
+            shape = str(body.get("shape") or "") or None
+            if shape is not None and shape not in gen.SHAPES:
+                raise ValueError(f"모르는 모양: {shape}")
+            motion = str(body.get("motion") or "") or None
+            if motion is not None and motion not in oracle.STRIPE_MOTIONS:
+                raise ValueError(f"모르는 움직임: {motion}")
+            fixed = {"shape": shape, "area": num("area", 0.02, 1.0), "freq_hz": num("freq_hz", 0.2, 30.0),
+                     "cpd": num("cpd", 0.2, 30.0), "motion": motion,
+                     "source": source or None, "start_sec": num("start_sec", 0, 1e7) or 0,
+                     "seconds": num("seconds", 0.1, 10) or 2, "max_side": 768}
+            same = bool(body.get("same_cond")) and kind == "gan"
+        except (ValueError, TypeError) as e:
+            return {"error": str(e)}
+        rng = np.random.default_rng(seed)
+        stamp = time.strftime("%m%d_%H%M%S")
+        group = f"생성 {time.strftime('%H:%M:%S')} · {gen.KIND_KO[kind]}"
+        recipes = []
+        job_id = uuid.uuid4().hex[:10]
+        for k in range(count):
+            it_intent = intent if intent in gen.INTENTS else gen.INTENTS[k % 2]      # '반반'은 위험·근처를 번갈아
+            bg_k = bg if bg is not None else int(rng.integers(0, counts[split]))
+            if same:                                   # 같은 바탕·영역·목표에서 z 만 바꾼다(다양성 확인용)
+                r = gen.sample_recipe(kind, intent if intent in gen.INTENTS else "hazard", seed, split=split,
+                                      bg=bg if bg is not None else recipes[0]["bg"] if recipes else bg_k,
+                                      checkpoint=ck, **fixed)
+                r["z_seed"] = int(np.random.default_rng([seed, k]).integers(0, 2 ** 31 - 1))
+            else:
+                r = gen.sample_recipe(kind, it_intent, seed + k, split=split, bg=bg_k, checkpoint=ck, **fixed)
+            r.update(id=f"gen_{stamp}_{job_id}_{k:02d}_{r['kind']}", group=group)
+            recipes.append(r)
+        with lock:
+            jobs[job_id] = {"ids": [r["id"] for r in recipes], "records": {}, "errors": {},
+                            "generation_only": bool(body.get("generation_only", False))}
+        for r in recipes:
+            work.put((job_id, r["id"], functools.partial(generated_item, r, gen_dir), detect_on, fast))
+        print(f"{group} → 영상 {len(recipes)}개 (seed {seed})", flush=True)
+        return {"job": job_id, "name": group, "seed": seed,
+                "items": [{"id": r["id"], "group": group, "title": gen.describe(r), "label": r["intent"] == "hazard",
+                           "label_note": "생성 중…", "source": str(gen_dir / f"{r['id']}.npz")} for r in recipes]}
 
     def start_job(path: Path, detect_on: bool, fps: float | None, group: str | None = None, fast: bool = True) -> dict:
         if path.is_dir():                          # 폴더: 안의 지원 파일 전부 (하위 폴더 포함)
@@ -629,7 +756,7 @@ def serve(args, det_hash: str) -> int:
         with lock:
             jobs[job_id] = {"ids": [it.id for it in items], "records": {}, "errors": {}}
         for it in items:
-            work.put((job_id, it, detect_on, fast))
+            work.put((job_id, it.id, it, detect_on, fast))
         print(f"열기 {path} → 영상 {len(items)}개", flush=True)
         return {"job": job_id, "name": path.name,
                 "items": [{"id": it.id, "group": it.group, "title": it.title, "label": it.label,
@@ -704,8 +831,15 @@ def serve(args, det_hash: str) -> int:
                 return
             u = urllib.parse.urlparse(self.path)
             path = urllib.parse.unquote(u.path)
+            if path == "/api/health":
+                return self._json({"app": "lumi-local", "root": str(ROOT.resolve()), "version": 1})
             if path in ("/", "/index.html"):
                 return self._send(200, INDEX_HTML.replace("__LUMI_TOKEN__", token).encode("utf-8"), CTYPES[".html"])
+            if path == "/generate":
+                html = (ROOT / "scripts/static/generator.html").read_text(encoding="utf-8")
+                return self._send(200, html.replace("__LUMI_TOKEN__", token).encode("utf-8"), CTYPES[".html"])
+            if path == "/api/generated":
+                return self._json({"results": workspace.list_results(gen_dir), "folder": str(gen_dir)})
             if path.startswith("/api/job/"):
                 with lock:
                     j = jobs.get(path.rsplit("/", 1)[-1])
@@ -714,6 +848,12 @@ def serve(args, det_hash: str) -> int:
                     recs = [j["records"][i] for i in j["ids"] if i in j["records"]]
                     return self._json({"total": len(j["ids"]), "done": len(recs) + len(j["errors"]),
                                        "records": recs, "errors": j["errors"]})
+            if path == "/api/gen/options":               # 생성 창에 채울 선택지: 체크포인트·바탕 분할
+                try:
+                    return self._json({"checkpoints": gen.list_checkpoints(), "backgrounds": gen.background_counts(),
+                                       "track": gen.TRACK.name, "sync_ms": measure.D3_SYNC_MS})
+                except Exception as e:
+                    return self._json({"error": f"{type(e).__name__}: {e}"}, 500)
             fpath = (out / path.lstrip("/")).resolve()
             if fpath.is_relative_to(out) and fpath.is_file():
                 return self._file(fpath)
@@ -737,6 +877,18 @@ def serve(args, det_hash: str) -> int:
             except ValueError:
                 fps = None
             length = int(self.headers.get("Content-Length", 0))
+            if u.path in ("/api/sources", "/api/inspect"):
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                    if u.path == "/api/sources":
+                        rows = workspace.list_sources(Path(body["folder"]), bool(body.get("recursive", False)))
+                        return self._json({"files": rows})
+                    sample_id = str(body["id"])
+                    if not re.fullmatch(r"[A-Za-z0-9_-]+", sample_id):
+                        raise ValueError("생성 결과 ID가 올바르지 않습니다")
+                    return self._json(start_job(gen_dir / f"{sample_id}.npz", True, None, fast=fast))
+                except (ValueError, TypeError, KeyError, OSError) as exc:
+                    return self._json({"error": str(exc)}, 400)
             if u.path == "/api/open":
                 if not self.headers.get("Content-Type", "").startswith("application/json"):
                     return self._json({"error": "JSON 요청만 받습니다"}, 415)
@@ -746,6 +898,16 @@ def serve(args, det_hash: str) -> int:
                     return self._json({"error": "잘못된 JSON"}, 400)
                 p = Path(str(body.get("path", "")).strip().strip('"').strip("'"))
                 return self._json(start_job(p, detect_on, fps, fast=fast))
+            if u.path == "/api/generate":
+                if not self.headers.get("Content-Type", "").startswith("application/json"):
+                    return self._json({"error": "JSON 요청만 받습니다"}, 415)
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                except json.JSONDecodeError:
+                    return self._json({"error": "잘못된 JSON"}, 400)
+                if not isinstance(body, dict):
+                    return self._json({"error": "잘못된 요청"}, 400)
+                return self._json(start_generate(body, detect_on, fast))
             if u.path == "/api/upload":
                 group = urllib.parse.unquote(self.headers.get("X-Group", "")) or None
                 name = Path(urllib.parse.unquote(self.headers.get("X-Filename", "upload.bin"))).name
@@ -772,7 +934,7 @@ def serve(args, det_hash: str) -> int:
                 return self._json(start_job(dest, detect_on, fps, group, fast=fast))
             self._json({"error": "없음"}, 404)
 
-    url = f"http://127.0.0.1:{args.port}/"
+    url = f"http://127.0.0.1:{args.port}/" + ("generate" if args.open_page == "generate" else "")
 
     class Server(http.server.ThreadingHTTPServer):
         allow_reuse_address = False                   # Windows 는 재사용을 켜면 같은 포트를 두 번 열 수 있음
@@ -833,6 +995,7 @@ def main() -> int:
     ap.add_argument("--serve", action="store_true",
                     help="로컬 서버로 열기: 페이지에서 파일을 골라 그 안의 영상을 모두 변환·판정 (묶음 생성은 하지 않음)")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--open-page", choices=("generate", "player"), default="player")
     ap.add_argument("--no-browser", action="store_true", help="서버 모드에서 브라우저를 자동으로 열지 않음")
     args = ap.parse_args()
     if args.serve and args.groups == DEFAULT_GROUPS:
@@ -952,6 +1115,11 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
 #summary { font-size: 12px; color: var(--muted); }
 #summary table { border-collapse: collapse; } #summary td, #summary th { padding: 1px 8px; text-align: right; } #summary td:first-child, #summary th:first-child { text-align: left; }
 .empty { color: var(--muted); padding: 40px; }
+[hidden] { display: none !important; }
+.genbar { padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; }
+.genbar select, .genbar input[type="text"] { padding: 4px 6px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.genbar .num { width: 62px; }
+.genbar .note { flex-basis: 100%; color: var(--muted); font-size: 12px; }
 @media (max-width: 800px) {
   .layout { grid-template-columns: 1fr; } aside { max-height: 40vh; position: static; }
 }
@@ -959,10 +1127,13 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
 </head>
 <body>
 <header>
-  <h1>LUMI 영상 플레이리스트</h1>
+  <h1>LUMI 탐지·검사 플레이어</h1>
+  <a href="/generate" style="color:var(--accent)">1. GAN 영상 생성</a>
+  <strong>2. 탐지·검사</strong>
   <span id="made" style="color:var(--muted);font-size:12px"></span>
   <span style="flex:1"></span>
   <div id="opener" class="opener" hidden>
+    <button id="genToggle" title="기존 실험 메뉴 (GAN · 규칙 기반)">고급 합성 실험…</button>
     <button id="pickDir" class="primary">폴더 열기…</button>
     <button id="pick" class="primary">파일 열기…</button>
     <input type="file" id="file" multiple accept=".npz,.gif,.mp4,.avi,.mkv,.mov,.m4v,.webm" hidden>
@@ -976,20 +1147,44 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
   <span id="nosrv" class="hint" hidden>파일 열기는 서버 모드에서만 됩니다: <code>LUMI_플레이어.bat</code> 더블클릭</span>
   <button id="theme" title="밝게/어둡게">테마</button>
 </header>
-<div class="warn" id="warn">⚠️ 광과민성 위험 자극이 들어 있습니다. 이 PC에서만 보고, 다른 사람이 있는 곳·발표 화면·녹화에서는 재생하지 마세요. 느리게(0.25×) 재생하면 깜빡임이 초당 3회 아래로 내려갑니다(고대비 줄무늬는 느려도 그대로 남음).</div>
+<div id="genbar" class="genbar" hidden>
+  <label>종류 <select id="gKind">
+    <option value="mix">섞어서 (무작위)</option><option value="gan">GAN (체크포인트의 종류: 휘도·적색·줄무늬)</option><option value="lum">규칙 휘도 깜빡임</option>
+    <option value="red">규칙 적색 깜빡임</option><option value="stripe">규칙 줄무늬</option></select></label>
+  <label data-gk="gan mix" title="data/gan 의 학습된 생성기. '섞어서'에서 비우면 GAN 을 빼고 섞습니다">체크포인트 <select id="gCk"></select></label>
+  <label title="근처 안전 = 조건 하나만 기준 아래 (휘도·적색: 초당 1~2.5회, 줄무늬: 면적 20~35%)">목표 <select id="gIntent">
+    <option value="both">위험·근처 안전 반반</option><option value="hazard">위험</option><option value="near">근처 안전</option></select></label>
+  <label>바탕 <select id="gSplit"></select></label>
+  <label title="비우면 바탕 데이터 사용. GAN 은 체크포인트와 같은 fps·해상도 필요">원본 경로 <input id="gSource" type="text" placeholder="C:\\...\\source.mp4"></label>
+  <label>시작 초 <input id="gStart" class="num" type="text" value="0"></label>
+  <label>길이 초 <input id="gSeconds" class="num" type="text" value="2"></label>
+  <label title="비우면 무작위">바탕 번호 <input type="text" id="gBg" class="num" placeholder="무작위" inputmode="numeric"></label>
+  <label>영역 <select id="gShape"><option value="">무작위</option><option value="ellipse">타원</option><option value="rectangle">사각형</option>
+    <option value="blobs">원 3개</option><option value="full">화면 전체</option></select></label>
+  <label title="화면 대비 영역 면적. 비우면 무작위 (위험 32~70%)">면적 % <input type="text" id="gArea" class="num" placeholder="무작위" inputmode="decimal"></label>
+  <label data-gk="lum red stripe" title="깜빡임 주파수(줄무늬는 명암 반전 주파수). 비우면 목표에 맞춰 무작위">주파수 Hz <input type="text" id="gFreq" class="num" placeholder="무작위" inputmode="decimal"></label>
+  <label data-gk="stripe" title="줄무늬 공간 주파수 (판정 범위 1~10 cpd). 비우면 1.5~8 무작위">cpd <input type="text" id="gCpd" class="num" placeholder="무작위" inputmode="decimal"></label>
+  <label data-gk="stripe">움직임 <select id="gMotion"><option value="">무작위</option><option value="static">정지</option><option value="reversing">반전</option><option value="drifting">흐름</option></select></label>
+  <label data-gk="gan" title="같은 바탕·영역·목표에서 잡음 z 만 바꿔 만듭니다 — GAN 이 얼마나 다양하게 만드는지 보는 용도"><input type="checkbox" id="gSame"> z 만 바꾸기</label>
+  <label title="한 번에 만들 영상 수 (1~16)">개수 <input type="text" id="gCount" class="num" value="4" inputmode="numeric"></label>
+  <label title="같은 시드 = 같은 영상. 비우면 무작위 (쓴 시드는 상태 줄과 클립 정보에 표시)">시드 <input type="text" id="gSeed" class="num" placeholder="무작위" inputmode="numeric"></label>
+  <button id="gGo" class="primary">생성</button>
+  <div class="note" id="gNote">생성 의도는 판정 정답이 아닙니다. 원본·합성본·실제 변경 영역을 함께 저장합니다. 원본 자체의 안전성은 별도 판정이 필요합니다. GAN 은 체크포인트마다 종류(휘도·적색·줄무늬)가 하나이고, '규칙 …' 은 식으로 만드는 생성기입니다. 외부 원본은 긴 변을 최대 768로 축소하고 원래 fps로 처리합니다(일정 프레임률 영상).</div>
+</div>
+<div class="warn" id="warn">⚠️ 광과민성 위험 자극이 들어 있습니다. 저속 재생도 안전을 보장하지 않습니다. 프레임 이동과 판정 그래프로 먼저 확인하세요.</div>
 <div class="layout">
   <aside>
     <div class="filters">
       <select id="fGroup"></select>
       <select id="fLabel">
-        <option value="">정답: 전체</option><option value="1">정답: 위험</option><option value="0">정답: 안전</option><option value="n">정답: 없음</option>
+        <option value="">참조/의도: 전체</option><option value="1">참조/의도: 위험</option><option value="0">참조/의도: 안전</option><option value="n">참조/의도: 없음</option>
       </select>
       <select id="fOut">
         <option value="">결과: 전체</option>
-        <option value="miss">놓침 (정답 위험 · 판정 안전)</option>
-        <option value="false_alarm">오탐 (정답 안전 · 판정 위험)</option>
-        <option value="hit">맞힘 (위험)</option>
-        <option value="correct">맞힘 (안전)</option>
+        <option value="miss">불일치 (참조/의도 위험 · 판정 안전)</option>
+        <option value="false_alarm">불일치 (참조/의도 안전 · 판정 위험)</option>
+        <option value="hit">일치 (위험)</option>
+        <option value="correct">일치 (안전)</option>
         <option value="no_label_alarm">정답 없음 · 판정 위험</option>
         <option value="no_label">정답 없음 · 판정 안전</option>
         <option value="not_run">판정 안 함</option>
@@ -1002,10 +1197,11 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
   <main>
     <div id="summary"></div>
     <div class="wrap" id="player" style="margin-top:10px">
-      <div class="heads"><span><b>영상</b></span><span><b>정답</b> — <span style="color:var(--gt)">■</span> 합성 영역(옅게) · 위험 구간(진하게)</span><span><b>우리 판정기</b> — <span style="color:var(--lum)">■</span>휘도 <span style="color:var(--red)">■</span>적색 <span style="color:var(--pat)">■</span>줄무늬(스캔선, 옅게 = 인식, 면적·지속 기준 전)</span><span><b>줄무늬 주파수 탐지기</b> (쿼드트리+가버) — <span style="color:var(--pat2)">■</span>줄무늬 영역(진하게 = 위험 구간) · 테두리 흰색 = 인정한 블록, 분홍 = 기각한 블록</span></div>
+      <div class="heads"><span><b>영상 / 합성본</b></span><span><b>원본·변경 영역 / 참조 라벨</b> — <span style="color:var(--gt)">■</span> 생성 쌍: 원본 위 변경 영역 · 기존 데이터: 참조 라벨</span><span><b>우리 판정기</b> — <span style="color:var(--lum)">■</span>휘도 <span style="color:var(--red)">■</span>적색 <span style="color:var(--pat)">■</span>줄무늬(스캔선, 옅게 = 인식, 면적·지속 기준 전)</span><span><b>줄무늬 주파수 탐지기</b> (쿼드트리+가버) — <span style="color:var(--pat2)">■</span>줄무늬 영역(진하게 = 위험 구간) · 테두리 흰색 = 인정한 블록, 분홍 = 기각한 블록</span></div>
       <video id="v" controls playsinline preload="metadata"></video>
       <div class="controls">
         <button id="prev">◀ 이전 (P)</button><button id="next">다음 (N) ▶</button>
+        <button id="framePrev">−1 프레임</button><button id="frameNext">+1 프레임</button>
         <span style="width:10px"></span>
         <span style="color:var(--muted);font-size:12px">속도</span>
         <button data-rate="0.25">0.25×</button><button data-rate="0.5">0.5×</button><button data-rate="1">1×</button>
@@ -1027,6 +1223,8 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
   const store = { get(k, d) { try { const v = localStorage.getItem("lumi_pl_" + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
                   set(k, v) { try { localStorage.setItem("lumi_pl_" + k, JSON.stringify(v)); } catch (e) {} } };
   const OUT_KO = { hit: "맞힘", correct: "맞힘", miss: "놓침", false_alarm: "오탐", no_label: "정답 없음", no_label_alarm: "정답 없음·판정 위험", not_run: "판정 안 함", pending: "처리 중", error: "실패" };
+  const labelName = c => c.meta?.label_source === "intent" ? "생성 의도" : "참조 라벨";
+  const outcomeName = c => c.meta?.label_source === "intent" && c.det ? (c.label === c.det.dangerous ? "의도 일치" : "의도 불일치") : OUT_KO[c.outcome];
   const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   $("made").textContent = META.made ? `만든 시각 ${META.made} · ${CLIPS.length}개` : "";
 
@@ -1045,7 +1243,7 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
     const sumRows = groups.map(g => { const cs = CLIPS.filter(c => c.group === g); const n = (o) => cs.filter(c => c.outcome === o).length;
       const pend = n("pending"), err = n("error");
       return `<tr><td>${esc(g)}</td><td>${cs.length}</td><td>${n("hit")}</td><td>${n("correct")}</td><td style="color:var(--miss)">${n("miss")}</td><td style="color:var(--fa)">${n("false_alarm")}</td><td>${n("no_label_alarm")} / ${n("no_label") + n("no_label_alarm")}</td><td>${n("not_run")}${pend ? ` · 처리 중 ${pend}` : ""}${err ? ` · 실패 ${err}` : ""}</td></tr>`; });
-    $("summary").innerHTML = groups.length ? `<table><tr><th>묶음</th><th>개수</th><th>맞힘(위험)</th><th>맞힘(안전)</th><th>놓침</th><th>오탐</th><th>정답 없음: 판정 위험/전체</th><th>판정 안 함</th></tr>${sumRows.join("")}</table>`
+    $("summary").innerHTML = groups.length ? `<table><tr><th>묶음</th><th>개수</th><th>일치(위험)</th><th>일치(안전)</th><th>불일치→안전</th><th>불일치→위험</th><th>정답 없음: 판정 위험/전체</th><th>판정 안 함</th></tr>${sumRows.join("")}</table>`
       : `<div class="empty">아직 클립이 없습니다. 위의 <b>파일 열기</b>로 npz·gif·mp4·avi 파일을 고르세요.</div>`;
   }
 
@@ -1058,7 +1256,7 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
     view = CLIPS.filter(c => (!g || c.group === g) && (!l || (l === "n" ? c.label === null : String(+c.label) === l && c.label !== null))
       && (!o || c.outcome === o) && (!q || (c.title + " " + c.label_note + " " + c.id).toLowerCase().includes(q)));
     $("count").textContent = `${view.length}개 표시`;
-    $("list").innerHTML = view.map((c, i) => `<div class="row" data-i="${i}"><div><div class="t">${esc(c.title)}</div><div class="g">${esc(c.group)} · 정답 ${c.label === null ? "없음" : c.label ? "위험" : "안전"} · 판정 ${c.det ? (c.det.dangerous ? "위험" : "안전") : "-"}</div></div><span class="badge o-${c.outcome}">${OUT_KO[c.outcome]}</span></div>`).join("") || `<div class="empty">조건에 맞는 클립이 없습니다.</div>`;
+    $("list").innerHTML = view.map((c, i) => `<div class="row" data-i="${i}"><div><div class="t">${esc(c.title)}</div><div class="g">${esc(c.group)} · ${labelName(c)} ${c.label === null ? "없음" : c.label ? "위험" : "안전"} · 판정 ${c.det ? (c.det.dangerous ? "위험" : "안전") : "-"}</div></div><span class="badge o-${c.outcome}">${outcomeName(c)}</span></div>`).join("") || `<div class="empty">조건에 맞는 클립이 없습니다.</div>`;
     for (const r of $("list").children) if (r.dataset.i !== undefined) r.onclick = () => select(+r.dataset.i);
     const keep = view.findIndex(c => c.id === store.get("last", ""));
     select(keep >= 0 ? keep : 0, false);
@@ -1074,6 +1272,9 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
   $("auto").onclick = () => { auto = !auto; store.set("auto", auto); syncButtons(); };
   $("prev").onclick = () => select(Math.max(0, cur - 1), true);
   $("next").onclick = () => select(Math.min(view.length - 1, cur + 1), true);
+  const stepFrame = delta => { const c = view[cur]; if (!c?.video) return; v.pause(); v.currentTime = Math.max(0, Math.min(c.n - 1, Math.floor(v.currentTime * c.fps + 1e-4) + delta)) / c.fps; };
+  $("framePrev").onclick = () => stepFrame(-1);
+  $("frameNext").onclick = () => stepFrame(1);
   v.onended = () => { if (auto && cur < view.length - 1) select(cur + 1, true); };
   document.addEventListener("keydown", (e) => { if (e.target.tagName === "INPUT") return; if (e.key === "n" || e.key === "N") $("next").click(); if (e.key === "p" || e.key === "P") $("prev").click(); });
   syncButtons();
@@ -1137,6 +1338,42 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
     try { const r = await fetch(`/api/open?${opts()}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Lumi-Token": TOKEN }, body: JSON.stringify({ path: p }) }); startJob(await r.json()); }
     catch (e) { setStatus("열기 실패: " + e); }
   }
+  // 생성 (서버 모드에서만): 조건을 고르면 서버가 영상을 만들고 판정해서 목록에 넣는다
+  const numOrNull = (id) => { const t = $(id).value.trim(); if (t === "") return null; const x = Number(t); return Number.isFinite(x) ? x : NaN; };
+  const syncGen = () => { const k = $("gKind").value; document.querySelectorAll("[data-gk]").forEach(el => { el.hidden = !el.dataset.gk.split(" ").includes(k); }); };
+  async function loadGenOptions() {
+    let o; try { o = await (await fetch("/api/gen/options")).json(); } catch (e) { $("gNote").textContent = "생성 선택지를 읽지 못했습니다: " + e; return; }
+    if (o.error) { $("gNote").textContent = "생성 선택지를 읽지 못했습니다: " + o.error; return; }
+    const cks = (o.checkpoints || []).filter(c => !c.error);
+    $("gCk").innerHTML = `<option value="">(GAN 없이)</option>` + cks.map(c => `<option value="${esc(c.name)}">[${{ lum: "휘도", red: "적색", stripe: "줄무늬" }[c.hazard] || "휘도"}] ${esc(c.name)} · ${c.steps}스텝 · λ_div ${c.lambda_div} · ${esc(c.made)}${c.judge_rule ? "" : " · 이전 판정 규칙"}</option>`).join("");
+    const newest = cks.find(c => c.judge_rule) || cks[0]; if (newest) $("gCk").value = newest.name;
+    const bgs = Object.entries(o.backgrounds || {});
+    $("gSplit").innerHTML = bgs.map(([s, n]) => `<option value="${esc(s)}">${esc(s)} (${n}개)</option>`).join("");
+    if (!bgs.length) $("gNote").textContent = `바탕 클립이 없습니다 (data/${o.track}/backgrounds_*.npz). scripts/make_oracle_dataset.py 로 먼저 만드세요.`;
+    $("gGo").disabled = !bgs.length && !$("gSource").value.trim();
+    $("gSource").oninput = () => { $("gGo").disabled = !bgs.length && !$("gSource").value.trim(); };
+    for (const k of ["gKind", "gIntent", "gSplit", "gShape", "gMotion", "gCount"]) { const sv = store.get("gen_" + k, null); if (sv !== null && [...($(k).options || [{ value: sv }])].some(op => op.value === sv)) $(k).value = sv; }
+    syncGen();
+  }
+  if (SERVED) {
+    $("genToggle").onclick = () => { $("genbar").hidden = !$("genbar").hidden; store.set("gen_open", !$("genbar").hidden); };
+    $("genbar").hidden = !store.get("gen_open", false);
+    $("gKind").onchange = syncGen;
+    $("gGo").onclick = async () => {
+      const body = { kind: $("gKind").value, intent: $("gIntent").value, count: numOrNull("gCount"), seed: numOrNull("gSeed"), split: $("gSplit").value, bg: numOrNull("gBg"),
+        source: $("gSource").value.trim() || null, start_sec: numOrNull("gStart"), seconds: numOrNull("gSeconds"),
+        checkpoint: $("gCk").value || null, shape: $("gShape").value || null, area: numOrNull("gArea"), freq_hz: numOrNull("gFreq"), cpd: numOrNull("gCpd"), motion: $("gMotion").value || null, same_cond: $("gSame").checked };
+      const bad = Object.entries(body).find(([, x]) => typeof x === "number" && Number.isNaN(x));
+      if (bad) { setStatus(`생성 실패: '${bad[0]}' 칸에 숫자가 아닌 값이 있습니다`); return; }
+      if (body.area !== null) body.area /= 100;
+      for (const k of ["gKind", "gIntent", "gSplit", "gShape", "gMotion", "gCount"]) store.set("gen_" + k, $(k).value);
+      setStatus("생성 요청 중…");
+      try { const r = await fetch(`/api/generate?${opts()}`, { method: "POST", headers: { "Content-Type": "application/json", "X-Lumi-Token": TOKEN }, body: JSON.stringify(body) });
+        const j = await r.json(); startJob(j); if (!j.error) setStatus(`${j.name}: 영상 ${j.items.length}개 만드는 중… (시드 ${j.seed})`); }
+      catch (e) { setStatus("생성 실패: " + e); }
+    };
+    loadGenOptions();
+  }
   function startJob(j) {
     if (j.error && j.error.startsWith("토큰")) {             // 서버를 다시 켜서 토큰이 바뀜 → 새 페이지를 받아야 함
       setStatus("서버가 다시 켜졌습니다. 페이지를 새로고침합니다…"); setTimeout(() => location.reload(), 800); return;
@@ -1165,7 +1402,7 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
     const d = c.det, R = META.rules || {};
     const yn = (b) => b ? `<b style="color:var(--miss)">위험</b>` : "안전";
     const pct = (x) => x == null ? "-" : (100 * x).toFixed(1) + "%";
-    const verdict = `<div class="big"><span class="badge o-${c.outcome}" style="font-size:13px">${OUT_KO[c.outcome]}</span> 정답 ${c.label === null ? "없음" : c.label ? "위험" : "안전"} · 판정 ${d ? (d.dangerous ? "위험" : "안전") : "-"}</div><div style="color:var(--muted);font-size:12px;margin-top:4px">${esc(c.label_note)}</div>`;
+    const verdict = `<div class="big"><span class="badge o-${c.outcome}" style="font-size:13px">${outcomeName(c)}</span> ${labelName(c)} ${c.label === null ? "없음" : c.label ? "위험" : "안전"} · 판정 ${d ? (d.dangerous ? "위험" : "안전") : "-"}</div><div style="color:var(--muted);font-size:12px;margin-top:4px">${esc(c.label_note)}</div>`;
     const det = d ? `<table>
       <tr><td>휘도</td><td>${yn(d.lum.dangerous)} · 최대 ${d.lum.max_flashes}회/초 (기준 &gt; ${R.max_flashes}) · 동시 전이 면적 ${pct(d.lum.peak_area)} (기준 &gt; ${pct(R.area)})</td></tr>
       <tr><td>적색</td><td>${yn(d.red.dangerous)} · 최대 ${d.red.max_flashes}회/초 · 면적 ${pct(d.red.peak_area)} · Δu′v′ ${(+d.red.max_delta_uv).toFixed(3)} (기준 &gt; 0.2)</td></tr>
@@ -1248,6 +1485,12 @@ canvas { width: 100%; display: block; background: var(--panel); border: 1px soli
     const t = (e.clientX - r.left - L) / PW; if (t >= 0 && t <= 1) { v.currentTime = t * c.n / c.fps; draw(); } });
   refreshGroups(); if (filt.fGroup !== undefined) $("fGroup").value = filt.fGroup;
   build();
+  const inspectId = new URLSearchParams(location.search).get("inspect");
+  if (SERVED && inspectId) {
+    setStatus("생성 결과의 원본·합성본을 검사 중…");
+    fetch(`/api/inspect?${opts()}`, {method:"POST",headers:{"Content-Type":"application/json","X-Lumi-Token":TOKEN},body:JSON.stringify({id:inspectId})})
+      .then(r => r.json()).then(startJob).catch(e => setStatus("검사 요청 실패: " + e));
+  }
 })();
 </script>
 </body>

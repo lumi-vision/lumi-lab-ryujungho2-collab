@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LUMI · GAN 영상 생성</title>
+<style>
+:root{color-scheme:dark;--bg:#11161e;--panel:#1a2230;--line:#354052;--ink:#e9edf4;--muted:#a9b5c9;--accent:#91bcff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 system-ui,'Malgun Gothic',sans-serif}header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:24px}header strong{font-size:20px;letter-spacing:2px}nav{display:flex;gap:8px}a{color:var(--accent)}nav a{padding:7px 16px;border:1px solid var(--line);border-radius:7px;text-decoration:none}nav a.active{background:var(--accent);color:#112035}main{max-width:1400px;margin:auto;padding:28px}h1{font-size:28px;margin:0 0 4px}h2{font-size:17px;margin:0 0 16px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(310px,1fr);gap:20px;margin:24px 0}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}input,select,button{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}input[type=checkbox]{accent-color:var(--accent)}input[type=number]{width:100%}button{cursor:pointer}button.primary{background:var(--accent);color:#112035;font-weight:700}button:disabled{opacity:.5;cursor:default}#folder{flex:1;min-width:180px}.scroll{overflow:auto;max-height:400px;margin-top:16px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}th{color:var(--muted);font-weight:500;white-space:nowrap}label.field{display:block;margin:12px 0}.field select{display:block;width:100%;margin-top:5px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}.fields label{color:var(--muted)}.fields input,.fields select{display:block;width:100%;margin-top:5px}.note{font-size:12px;color:var(--muted);margin-top:12px}.error{color:#ffacac}#progress{white-space:pre-wrap;margin:16px 0}#run{width:100%;margin-top:18px;padding:12px}.empty{padding:30px 8px;color:var(--muted)}.tag{font-size:12px;color:var(--accent)}.output-path{font-size:12px;max-width:320px}code{font-size:12px;overflow-wrap:anywhere}@media(max-width:900px){.grid{grid-template-columns:1fr}header{flex-wrap:wrap}main{padding:18px}}
+</style>
+</head>
+<body>
+<header><strong>LUMI</strong><nav><a class="active" href="/generate">1. GAN 영상 생성</a><a href="/">2. 탐지·검사 플레이어</a></nav></header>
+<main>
+<h1>원본 영상에 위험 요소 합성</h1>
+<div class="muted">원본 폴더에서 영상을 선택해 생성하고, 완성된 결과는 전용 플레이어에서 검사합니다.</div>
+<div class="grid">
+<section class="card"><h2>1 · 원본 영상 선택</h2>
+<form id="folderForm"><div class="row"><input id="folder" aria-label="원본 폴더 경로" placeholder="C:\data\originals" required><button id="scan" type="submit">폴더 불러오기</button></div></form>
+<div class="row" style="margin-top:12px"><label><input id="recursive" type="checkbox"> 하위 폴더 포함</label><button id="selectAll" type="button">전체 선택</button><button id="selectNone" type="button">선택 해제</button><span id="selection" class="muted">0개 선택</span></div>
+<div class="scroll"><table><thead><tr><th>선택</th><th>원본 영상</th><th>크기 / fps</th><th>길이</th></tr></thead><tbody id="sources"><tr><td colspan="4" class="empty">폴더 경로를 입력하면 영상 목록이 표시됩니다.</td></tr></tbody></table></div>
+<div id="folderStatus" class="note" role="status"></div>
+</section>
+<section class="card"><h2>2 · GAN 생성 설정</h2>
+<label class="field">학습된 G 체크포인트<select id="checkpoint" aria-label="학습된 G 체크포인트"></select></label>
+<div id="modelInfo" class="note"></div>
+<div class="fields">
+<label>시작 시간 (초)<input id="start" type="number" min="0" step="0.1" value="0"></label>
+<label>생성 구간 (초)<input id="seconds" type="number" min="0.1" max="10" step="0.1" value="2"></label>
+<label>영상당 생성 수<input id="count" type="number" min="1" max="16" value="1"></label>
+<label>시드<input id="seed" type="number" min="0" max="2147483000" value="14"></label>
+<label>영역 모양<select id="shape"><option value="">무작위</option><option value="ellipse">타원</option><option value="blobs">여러 영역</option><option value="rectangle">사각형</option><option value="full">화면 전체</option></select></label>
+<label>면적 (%)<input id="area" type="number" min="2" max="100" placeholder="무작위"></label>
+</div>
+<label class="field">생성 목표<select id="intent"><option value="hazard">위험</option><option value="near">근처 안전 (비교용)</option><option value="both">위험·근처 안전 교대</option></select></label>
+<button id="run" class="primary" disabled>선택 영상으로 GAN 생성</button>
+<div class="note">지정 구간만 합성합니다. 원본 fps를 유지하고 긴 변은 최대 768로 축소합니다. 축소 후 크기·fps가 체크포인트와 일치해야 합니다.</div>
+<div class="note">생성 완료는 위험 판정 통과를 뜻하지 않습니다. 검사 단계에서 실제 위험 여부를 확인하세요.</div>
+</section>
+</div>
+<section class="card"><div class="row"><h2 style="margin:0">3 · 생성 결과</h2><span class="tag">합성 → 저장 → 검사</span><button id="refresh" style="margin-left:auto">결과 새로고침</button></div>
+<div id="progress" role="status" aria-live="polite"></div><div id="output" class="note"></div>
+<div class="scroll"><table><thead><tr><th>생성 결과</th><th>원본</th><th>저장 파일</th><th>검사</th></tr></thead><tbody id="results"></tbody></table></div>
+<div class="note">MKV는 합성 영상, NPZ는 원본·합성본·변경 마스크·레시피를 담은 쌍 데이터입니다. 검사 플레이어는 NPZ를 읽어 원본과 합성본을 각각 탐지합니다.</div>
+</section>
+</main>
+<script>
+(() => {
+  const TOKEN = "__LUMI_TOKEN__", $ = id => document.getElementById(id);
+  const esc = x => String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let sources = [], checkpoints = [], running = false;
+  const selected = () => [...document.querySelectorAll('[data-source]:checked')].map(el => sources[Number(el.dataset.source)]);
+  async function api(path, body) {
+    const response = await fetch(path, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','X-Lumi-Token':TOKEN},body:JSON.stringify(body)});
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    return data;
+  }
+  function selectionChanged() {
+    $('selection').textContent = `${selected().length} / ${sources.length}개 선택`;
+    $('run').disabled = running || !selected().length || !$('checkpoint').value;
+  }
+  function modelChanged() {
+    const c = checkpoints.find(c => c.name === $('checkpoint').value);
+    $('modelInfo').textContent = c ? `학습 규격: ${c.train_hw ? c.train_hw[1]+'×'+c.train_hw[0] : '해상도 기록 없음'} · ${c.fps} fps · ${c.steps}스텝` : '사용할 수 있는 체크포인트가 없습니다.';
+    selectionChanged();
+  }
+  $('checkpoint').onchange = modelChanged;
+  $('sources').onchange = selectionChanged;
+  $('selectAll').onclick = () => { document.querySelectorAll('[data-source]:not(:disabled)').forEach(el => el.checked = true); selectionChanged(); };
+  $('selectNone').onclick = () => { document.querySelectorAll('[data-source]').forEach(el => el.checked = false); selectionChanged(); };
+  $('folderForm').onsubmit = async event => {
+    event.preventDefault(); $('scan').disabled = true; $('folderStatus').textContent = '영상 목록을 읽는 중…';
+    sources = []; $('sources').innerHTML = ''; selectionChanged();
+    try {
+      const result = await api('/api/sources', {folder:$('folder').value.trim(),recursive:$('recursive').checked});
+      sources = result.files;
+      $('sources').innerHTML = sources.map((s,i) => `<tr><td><input type="checkbox" data-source="${i}" aria-label="${esc(s.name)} 선택" ${s.error ? 'disabled' : ''}></td><td>${esc(s.name)}${s.error ? `<div class="error">${esc(s.error)}</div>` : ''}</td><td>${s.width || '-'}×${s.height || '-'} / ${s.fps?.toFixed(3) || '-'}</td><td>${s.seconds?.toFixed(1) || '-'}초</td></tr>`).join('') || '<tr><td colspan="4" class="empty">지원하는 동영상이 없습니다.</td></tr>';
+      $('folderStatus').textContent = `${sources.length}개 영상 · 파일을 선택하세요`;
+    } catch (e) { $('folderStatus').textContent = e.message; }
+    finally { $('scan').disabled = false; selectionChanged(); }
+  };
+  async function refreshResults() {
+    const data = await api('/api/generated');
+    $('output').textContent = `저장 폴더: ${data.folder}`;
+    $('results').innerHTML = data.results.map(r => `<tr><td>${esc(r.title)}<div class="note">${esc(r.made)} · ${r.n}프레임 · 검사 전</div></td><td>${esc(r.original || '-')}</td><td class="output-path"><code>${esc(r.movie)}</code><br><code>${esc(r.source)}</code></td><td><a href="/?inspect=${encodeURIComponent(r.id)}">플레이어에서 검사 →</a></td></tr>`).join('') || '<tr><td colspan="4" class="empty">아직 생성한 결과가 없습니다.</td></tr>';
+  }
+  $('refresh').onclick = () => refreshResults().catch(e => $('progress').textContent = e.message);
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  function number(id, min, max, integer=false) {
+    const n = Number($(id).value);
+    if (!$(id).value.trim() || !Number.isFinite(n) || n < min || n > max || (integer && !Number.isInteger(n))) throw new Error(`${id}: ${min}~${max} 범위의 ${integer ? '정수' : '숫자'}를 입력하세요`);
+    return n;
+  }
+  $('run').onclick = async () => {
+    const inputs = selected(), errors = []; let completed = 0;
+    try {
+      if (!inputs.length) throw new Error('원본 영상을 선택하세요');
+      if (inputs.length > 32) throw new Error('한 번에 원본 32개까지 선택하세요');
+      const params = {kind:'gan',generation_only:true,checkpoint:$('checkpoint').value,intent:$('intent').value,
+        start_sec:number('start',0,1e7),seconds:number('seconds',0.1,10),count:number('count',1,16,true),seed:number('seed',0,2147483000,true),
+        shape:$('shape').value || null,area:$('area').value.trim() ? number('area',2,100)/100 : null};
+      const ck = checkpoints.find(c => c.name === params.checkpoint);
+      // 추론 전 입력 규격을 확인한다. 임의 fps 변경으로 시간 특성을 바꾸지 않는다.
+      for (const s of inputs) {
+        const scale = Math.min(1,768/Math.max(s.width,s.height));
+        if (s.fps == null || Math.abs(s.fps-ck.fps)>1e-6 || (ck.train_hw && (Math.round(s.width*scale)!==ck.train_hw[1] || Math.round(s.height*scale)!==ck.train_hw[0]))) throw new Error(`${s.name}: 축소 후 크기/fps가 학습 규격과 다릅니다. ${$('modelInfo').textContent}`);
+        if (s.seconds != null && params.start_sec >= s.seconds) throw new Error(`${s.name}: 시작 시간이 영상 길이를 넘습니다`);
+      }
+      running = true; selectionChanged();
+      const jobs = [];
+      for (let i=0;i<inputs.length;i++) {
+        try { const job = await api('/api/generate?detect=0', {...params,source:inputs[i].path,seed:params.seed+i}); jobs.push({id:job.job,name:inputs[i].name,total:job.items.length,done:false}); }
+        catch(e) { errors.push(`${inputs[i].name}: ${e.message}`); }
+      }
+      while (jobs.some(j => !j.done)) {
+        let processed = 0; completed = 0;
+        for (const job of jobs) {
+          if (!job.done) { job.state = await api('/api/job/'+job.id); job.done = job.state.done === job.state.total; }
+          processed += job.state.done; completed += job.state.records.length;
+        }
+        const total = jobs.reduce((sum,j) => sum+j.total,0);
+        $('progress').textContent = `생성 처리 ${processed} / ${total} · 저장 완료 ${completed} · 검사하지 않음`;
+        if (jobs.some(j => !j.done)) await sleep(1500);
+      }
+      for (const job of jobs) for (const message of Object.values(job.state.errors)) errors.push(`${job.name}: ${message}`);
+      $('progress').textContent = `생성 완료 ${completed}개. 아래 결과에서 검사 플레이어를 열 수 있습니다.` + (errors.length ? '\n실패: '+errors.join('\n') : '');
+      await refreshResults();
+    } catch (e) { $('progress').textContent = e.message; }
+    finally { running = false; selectionChanged(); }
+  };
+  (async () => {
+    try {
+      const data = await api('/api/gen/options'); checkpoints = data.checkpoints.filter(c => !c.error);
+      const kinds = {lum:'휘도',red:'적색',stripe:'줄무늬'};
+      $('checkpoint').innerHTML = checkpoints.map(c => `<option value="${esc(c.name)}">${esc(kinds[c.hazard] || c.hazard)} · ${esc(c.name)}</option>`).join('');
+      modelChanged(); await refreshResults();
+    } catch (e) { $('progress').textContent = e.message; }
+  })();
+})();
+</script>
+</body>
+</html>

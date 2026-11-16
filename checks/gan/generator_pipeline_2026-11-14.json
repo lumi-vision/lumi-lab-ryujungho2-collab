@@ -1,0 +1,64 @@
+[
+  {
+    "intent": "hazard",
+    "checkpoint": "w_div2.0_2k_s0.pt",
+    "fps": 24.0,
+    "shape": [
+      48,
+      432,
+      768,
+      3
+    ],
+    "actual_luminance_hazard": true,
+    "max_flashes": 7.5,
+    "original_luminance_hazard": false,
+    "outside_changed_pixels": 0,
+    "pair": "C:\\dev\\lumi-vision\\lumi-lab-ryujungho2-collab\\data\\generator_review_20261114\\smoke_hazard_1794646605843565100.npz",
+    "seconds": 6.4,
+    "player_verdict": {
+      "dangerous": true,
+      "lum": {
+        "dangerous": true,
+        "max_flashes": 7.5,
+        "peak_area": 0.5182
+      },
+      "red": {
+        "dangerous": false,
+        "max_flashes": 0.0,
+        "peak_area": 0.0,
+        "max_delta_uv": 0.0
+      },
+      "pat": {
+        "dangerous": false,
+        "peak_area": 0.0,
+        "max_sec": 0.0,
+        "motion": ""
+      },
+      "pat2": {
+        "dangerous": false,
+        "peak_area": 0.0,
+        "max_sec": 0.0,
+        "method": "쿼드트리+가버"
+      },
+      "fast": true
+    },
+    "player_video": "clips/smoke_hazard_1794646605843565100.mp4"
+  },
+  {
+    "intent": "near",
+    "checkpoint": "w_div2.0_2k_s0.pt",
+    "fps": 24.0,
+    "shape": [
+      48,
+      432,
+      768,
+      3
+    ],
+    "actual_luminance_hazard": false,
+    "max_flashes": 2.5,
+    "original_luminance_hazard": false,
+    "outside_changed_pixels": 0,
+    "pair": "C:\\dev\\lumi-vision\\lumi-lab-ryujungho2-collab\\data\\generator_review_20261114\\smoke_near_1794646623897290200.npz",
+    "seconds": 3.82
+  }
+]

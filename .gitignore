@@ -17,3 +17,9 @@ __pycache__/
 .vscode/
 *.egg-info/
 .pytest_cache/
+
+# 빌드한 Windows 실행기 (소스: scripts/windows/)
+/LUMI*.exe
+
+# 개인 도구 상태
+.omc/

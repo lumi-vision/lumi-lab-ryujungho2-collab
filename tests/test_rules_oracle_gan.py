@@ -212,6 +212,121 @@ def test_soft_judge_counts_opposite_phase_once(hz):
 
 
 # ---------------------------------------------------------------- 트랙(해상도·fps)
+def test_normalized_diversity_ignores_intensity_and_sees_rhythm():
+    # 다양성 손실(정규화): 세기만 2배인 빛은 차이 0, 리듬(주파수)이 다른 빛은 차이가 난다.
+    # 정규화하지 않으면 세기 차이만으로도 손실이 줄어든다 — λ_div 를 키울 때 빛이 세지던 원인으로 추정한 것.
+    import math
+
+    from lumi_synth.gan import spectral_diversity
+    t = torch.arange(48) / 24.0
+    light = lambda hz, amp: (amp * (0.5 + 0.5 * torch.sin(2 * math.pi * hz * t)))[None, None, :, None, None].expand(1, 1, 48, 4, 4)
+    mask = torch.ones(1, 1, 1, 4, 4)
+    z1, z2 = torch.zeros(1, 4), torch.ones(1, 4)
+    same_rhythm = float(spectral_diversity(light(4, 0.2), light(4, 0.4), mask, z1, z2, normalize=True))
+    other_rhythm = float(spectral_diversity(light(4, 0.2), light(7, 0.2), mask, z1, z2, normalize=True))
+    assert abs(same_rhythm) < 1e-4 and other_rhythm < -0.02
+    assert float(spectral_diversity(light(4, 0.2), light(4, 0.4), mask, z1, z2)) < -0.05     # 정규화 없음: 세기 차이가 보임
+
+
+# ---------------------------------------------------------------- 적색·줄무늬 GAN (2026-11-14)
+@pytest.mark.parametrize("hz", [2.0, 5.0])
+def test_red_soft_judge_tracks_hard_judge(hz):
+    # 적색 소프트 판정기: 규칙 기반 적색 깜빡임(같은 휘도의 빨강 ↔ 파랑 쪽 색)에서 하드 판정의 전이 수와 1번 이내로 맞는다.
+    from lumi_synth.gan import soft_judge_red, srgb_to_linear
+    clean = np.full((48, 36, 64, 3), 128, np.uint8)
+    mask = oracle.region_mask("rectangle", 0.5, 36, 64)
+    pair = oracle.red_pair(0.9, 0.28)
+    v = oracle.render_red(clean, mask, oracle.wave("square", hz, 48, 24.0), pair["a_rgb"], pair["b_rgb"])
+    hard = measure.analyze_red(v, 24.0)
+    x = torch.from_numpy(v).permute(3, 0, 1, 2)[None].float() / 255
+    soft = float(soft_judge_red(srgb_to_linear(x), 24.0)["count"][0])
+    assert abs(soft - 2 * hard["max_flashes"]) <= 1.0
+    assert (soft >= 7) == hard["dangerous"]
+
+
+@pytest.mark.parametrize("hazard", ["red", "stripe"])
+def test_hazard_generators_keep_outside_of_mask(hazard):
+    from lumi_synth.gan import STRIPE_HI, STRIPE_SPEED_MAX, make_generator
+    torch.manual_seed(0)
+    g = make_generator(hazard, width=8, zdim=4, fps=24.0)
+    clean = torch.rand(2, 3, 24, 36, 64)
+    mask = torch.zeros(2, 1, 1, 36, 64)
+    mask[..., 8:28, 16:48] = 1
+    outs = g(clean, mask, torch.tensor([1.0, 0.0]), torch.randn(2, 4))
+    out, field = outs[0], outs[1]
+    assert out.shape == clean.shape and field.shape == (2, 1, 24, 36, 64)
+    assert torch.equal(out * (1 - mask), clean * (1 - mask))            # 마스크 밖 = 정확히 원본
+    assert float(field.min()) >= 0.0 and float(field.max()) <= 1.0       # 빨강 정도 ρ · 덮는 정도 a
+    assert not torch.equal(out * mask, clean * mask)                     # 마스크 안은 바뀜
+    if hazard == "stripe":
+        cpd, theta, speed, hi = outs[2].unbind(1)
+        assert outs[2].shape == (2, 4) and bool((cpd > 0).all()) and bool(((theta >= 0) & (theta < 3.1416)).all())
+        assert bool((speed.abs() <= STRIPE_SPEED_MAX).all()) and bool(((hi >= STRIPE_HI[0]) & (hi <= STRIPE_HI[1])).all())
+    with pytest.raises(ValueError):
+        make_generator("nope")
+
+
+def test_red_generator_full_blend_is_saturated_red_with_same_luminance():
+    # 섞는 식: ρ = 1 이면 그 픽셀은 포화 빨강(판정기 기준)이 되고, 어두운 장면(Y ≤ 0.2126)에서는 휘도가 그대로다.
+    from lumi_synth.gan import DELTA_MAX, RedGenerator, luminance_rel, srgb_to_linear
+
+    class Full(RedGenerator):
+        def light(self, clean, mask, target, z):
+            return torch.full_like(clean[:, :1], DELTA_MAX)
+
+    clean = torch.rand(1, 3, 4, 8, 8) * 0.4 + 0.05                       # 선형 휘도 약 0.003~0.17
+    out, _ = Full(8, 4, 24.0)(clean, torch.ones(1, 1, 1, 8, 8), torch.ones(1), torch.zeros(1, 4))
+    x = (out[0].permute(1, 2, 3, 0) * 255).round().byte().numpy()
+    sat, _, _ = measure.red_state(x)
+    assert sat.all()
+    y0, y1 = luminance_rel(srgb_to_linear(clean)), luminance_rel(srgb_to_linear(out))
+    keep = y0 >= 0.2126 * 0.10                                           # 그보다 어두운 픽셀은 빨강 하한 때문에 밝아진다
+    assert float((y1 - y0)[keep].abs().max()) < 2e-3
+
+
+def test_stripe_generator_draws_stripes_the_detector_finds():
+    # 섞는 식: a = 1 이면 영역이 그 cpd 의 줄무늬로 덮이고, 줄무늬 탐지기(쿼드트리+가버)가 영역 면적만큼 찾는다.
+    from lumi_synth import stripe_freq as sf
+    from lumi_synth.gan import DELTA_MAX, StripeGenerator
+
+    class Fixed(StripeGenerator):
+        def light(self, clean, mask, target, z):
+            return torch.full_like(clean[:, :1], DELTA_MAX)
+
+        def stripe_params(self, target, z, ppd):
+            return torch.tensor([[2.0, 0.6, 0.0, 0.55]])                 # 2 cpd, 약 34°, 정지, 밝은 줄 110 cd/m²
+
+    h, w = 216, 384
+    mask = oracle.region_mask("rectangle", 0.6, h, w)
+    clean = torch.full((1, 3, 2, h, w), 0.5)
+    out, amp, par = Fixed(8, 4, 24.0)(clean, torch.from_numpy(mask[None, None, None]).float(), torch.ones(1), torch.zeros(1, 4))
+    x = (out[0].permute(1, 2, 3, 0) * 255).round().byte().numpy()
+    found = sf.frame_stripes_quadtree(measure.luminance_cd(x[0]), None, refine=True)["mask"]
+    assert found.mean() == pytest.approx(mask.mean(), abs=0.05)
+    assert (found & ~mask).mean() < 0.03                                  # 영역 밖을 줄무늬로 칠하지 않음
+
+
+def test_stripe_judge_loss_targets_and_gradient():
+    from lumi_synth.gan import StripeGenerator, judge_loss_stripe, soft_judge_stripe, stripe_diversity
+    full, none = torch.ones(1, 1, 48, 8, 8), torch.zeros(1, 1, 48, 8, 8)
+    brief = none.clone()
+    brief[:, :, :4] = 1                                                  # 4프레임(0.17초)만 화면 전체
+    hi = torch.tensor([0.55])
+    assert float(soft_judge_stripe(full, hi, 24.0)["duration"][0]) == pytest.approx(1.0, abs=0.02)
+    assert float(judge_loss_stripe(full, hi, torch.ones(1), 24.0)[0]) < 1e-3      # 계속 덮음 = 위험 목표 충족
+    assert float(judge_loss_stripe(full, hi, torch.zeros(1), 24.0)[0]) > 1.0      # 근처 안전 목표에는 어긋남
+    assert float(judge_loss_stripe(brief, hi, torch.zeros(1), 24.0)[0]) < 1e-3    # 잠깐만 덮음 = 근처 안전 충족
+    assert float(judge_loss_stripe(none, hi, torch.zeros(1), 24.0)[0]) > 1.0      # 아무것도 없음은 근처 안전이 아님
+    torch.manual_seed(0)
+    g = StripeGenerator(8, 4, 24.0)
+    clean, mask = torch.rand(2, 3, 24, 32, 32), torch.ones(2, 1, 1, 32, 32)
+    z1, z2 = torch.randn(2, 4), torch.randn(2, 4)
+    o1, o2 = g(clean, mask, torch.tensor([1.0, 0.0]), z1), g(clean, mask, torch.tensor([1.0, 0.0]), z2)
+    loss = judge_loss_stripe(mask * o1[1], o1[2][:, 3], torch.tensor([1.0, 0.0]), 24.0)[0] + stripe_diversity(o1[2], o2[2], z1, z2)
+    loss.backward()
+    assert g.head.weight.grad.abs().sum() > 0 and g.par[0].weight.grad.abs().sum() > 0
+
+
 def test_track_tag():
     # 판정 해상도 = 학습 해상도 = 768×432 로 통일(2026-11-09). 128×72 는 예비 실험 재현용.
     from lumi_synth.data import ClipSpec
@@ -310,3 +425,42 @@ def _read_all(path):
         out.append(f)
     cap.release()
     return out
+
+
+def test_red_crisp_loss_prefers_one_frame_switches():
+    """한 프레임에 켜지고 꺼지는 ρ(사각파)는 손실 0, 서서히 바뀌는 ρ 는 손실이 크다. 마스크 밖은 재지 않는다."""
+    torch = pytest.importorskip("torch")
+    from lumi_synth import gan
+    t = torch.arange(48).float()
+    shape = (1, 1, 48, 4, 4)
+    square = ((t // 3) % 2).view(1, 1, 48, 1, 1).expand(shape)
+    slow = (0.5 + 0.5 * torch.sin(2 * torch.pi * t / 12)).view(1, 1, 48, 1, 1).expand(shape)
+    mask = torch.ones(1, 1, 1, 4, 4)
+    assert float(gan.red_crisp_loss(square, mask)) == 0.0
+    assert float(gan.red_crisp_loss(slow, mask)) > 0.15
+    assert float(gan.red_crisp_loss(slow, torch.zeros_like(mask))) == 0.0
+
+
+def test_red_palette_states_are_red_and_not_red_and_keep_outside():
+    """적색 v2(palette): 빨강 상태는 포화 빨강, 빨강 아닌 상태는 아님. 평평한 빨강 ↔ 평평한 다른 색 4 Hz 사각파는 적색 위험. 마스크 밖은 원본."""
+    torch = pytest.importorskip("torch")
+    from lumi_synth import gan
+    rng = np.random.default_rng(0)
+    clean_u8 = rng.integers(30, 200, (1, 48, 36, 64, 3)).astype(np.uint8)
+    clean = torch.from_numpy(clean_u8).permute(0, 4, 1, 2, 3).float() / 255
+    lin = gan.srgb_to_linear(clean)
+    for p in ([1, 0, 0.4, 0, 0.5, 0.5, 0.5, 0, 0.5], [0.3, 1, 0.6, 1, 1, 0, 0.6, 1, 0.3], [0.5, 1, 0.1, 0.8, 0, 1, 0, 1, 0.6]):
+        other, red = gan.red_palette(lin, torch.tensor([p], dtype=torch.float32))
+        ratio = red[:, 2] / red.sum(1)
+        assert float(ratio.min()) >= measure.RED_SAT_RATIO and float((red[:, 2] - red[:, 0] - red[:, 1]).min()) >= measure.RED_MIN_EXCESS
+        rho = ((torch.arange(48) // 3) % 2).float().view(1, 1, 48, 1, 1)
+        mask = torch.zeros(1, 1, 1, 36, 64)
+        mask[..., 4:32, 6:58] = 1
+        out = gan.linear_to_srgb((1 - mask) * lin + mask * ((1 - rho) * other + rho * red))
+        x = (out[0].permute(1, 2, 3, 0) * 255).round().clamp(0, 255).byte().numpy()
+        assert measure.analyze_red(x, 24.0)["dangerous"]
+        assert np.abs(x.astype(int) - clean_u8[0])[:, ~mask[0, 0, 0].bool().numpy()].max() <= 1
+    g = gan.make_generator("red", 4, 8, 24.0, red_palette=True)
+    o = g(clean, mask[:, :, :, :, :], torch.ones(1), torch.randn(1, 8))
+    assert len(o) == 3 and o[2].shape == (1, gan.RED_PALETTE_N)
+    assert torch.equal(o[0][..., ~mask[0, 0, 0].bool()], clean[..., ~mask[0, 0, 0].bool()])
