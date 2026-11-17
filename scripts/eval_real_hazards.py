@@ -127,11 +127,19 @@ def main():
     ap.add_argument("--team-dir", required=True)
     ap.add_argument("--sources", nargs="+", default=["south", "kaya"])
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--items", type=Path, default=None,
+                    help="이 목록(data/hazcls/real/items.jsonl)에 있는 영상만, 위험 라벨 먼저 (HazNet 시험 영상과 같은 것)")
     a = ap.parse_args()
     done = set()
     if OUT.exists():
         done = {json.loads(l)["file"] for l in OUT.read_text(encoding="utf-8").splitlines() if l.strip()}
-    jobs = [(p, s) for p, s in list_files(a.sources) if str(Path(p).relative_to(REAL)) not in done]
+    files = list_files(a.sources)
+    if a.items:
+        its = [json.loads(l) for l in a.items.read_text(encoding="utf-8").splitlines() if l.strip()]
+        rank = {it["file"]: (0 if it["any"] else 1, i) for i, it in enumerate(its)}
+        files = sorted([f for f in files if str(Path(f[0]).relative_to(REAL)) in rank],
+                       key=lambda f: rank[str(Path(f[0]).relative_to(REAL))])
+    jobs = [(p, s) for p, s in files if str(Path(p).relative_to(REAL)) not in done]
     print(f"남은 영상 {len(jobs)}개 (이미 {len(done)}개)", flush=True)
     t0 = time.time()
     with ProcessPoolExecutor(a.workers) as ex, open(OUT, "a", encoding="utf-8") as f:
