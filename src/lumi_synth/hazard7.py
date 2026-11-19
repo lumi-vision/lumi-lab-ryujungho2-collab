@@ -311,6 +311,72 @@ def red_modulate(clean: np.ndarray, a: np.ndarray, s: np.ndarray, mode: str, p: 
     return u8(y)
 
 
+# ---------------- GPU(torch) 섞기 — 위 numpy 식과 같은 식. render(device=...) 가 쓴다 ----------------
+
+def _tl(x_u8, dev):
+    import torch
+    lut = torch.as_tensor(_LUT, device=dev)
+    return lut[torch.as_tensor(np.ascontiguousarray(x_u8), device=dev).long()]
+
+
+def _tu8(y):
+    import torch
+    y = y.clamp(0, 1)
+    c = torch.where(y <= 0.0031308, y * 12.92, 1.055 * y.pow(1 / 2.4) - 0.055)
+    return (c * 255.0).round().clamp(0, 255).to(torch.uint8).cpu().numpy()
+
+
+def _ta(a, n, dev):
+    import torch
+    t = torch.as_tensor(np.ascontiguousarray(a, dtype=np.float32), device=dev)
+    return t if t.ndim == 3 else t.expand(n, *t.shape)
+
+
+def mix_torch(kind: str, mode: str, clean, a, s, p: dict, dev, other=None, plum=None) -> np.ndarray:
+    """한 묶음(프레임 몇 장)을 GPU 에서 섞는다 → uint8 BGR. 식은 lum_modulate·scene_cut·red_modulate·pattern_overlay 와 같다."""
+    import torch
+    x = _tl(clean, dev)
+    n = x.shape[0]
+    st = torch.as_tensor(s, device=dev, dtype=torch.float32)[:, None, None, None]
+    act = torch.as_tensor(p["active"], device=dev, dtype=torch.float32)[:, None, None, None]
+    if kind == "scene_cut":
+        b = _tl(other, dev)
+        y = torch.where(st >= 0.5, (b * p["bright_gain"] + p["bright_lift"]).clamp(0, 1), x * p["dark_gain"])
+        return _tu8(act * y + (1 - act) * x)
+    w = _ta(a, n, dev)[..., None]
+    if kind == "lum":
+        if mode == "add":
+            col = torch.tensor(p.get("light_bgr", (1.0, 1.0, 1.0)), device=dev, dtype=torch.float32)
+            col = col / (col @ torch.tensor([0.0722, 0.7152, 0.2126], device=dev))
+            y = x + w * st * (p["delta_cd"] / W_CD) * col
+        elif mode == "gain":
+            g = p["gain_lo"] + (p["gain_hi"] - p["gain_lo"]) * st
+            y = x * (1 - w) + x * g * w + w * st * p.get("lift", 0.0)
+        else:
+            lo, hi = p["lo_cd"] / W_CD, p["hi_cd"] / W_CD
+            y = x * (1 - w) + (lo + (hi - lo) * st) * w
+        return _tu8(y)
+    if kind == "red":
+        if mode == "pair":
+            ca = torch.as_tensor(_LUT[np.array(p["a_rgb"][::-1], np.uint8)], device=dev)
+            cb = torch.as_tensor(_LUT[np.array(p["b_rgb"][::-1], np.uint8)], device=dev)
+            return _tu8(x * (1 - w) + torch.where(st >= 0.5, cb, ca) * w)
+        lum = (x @ torch.tensor([0.0722, 0.7152, 0.2126], device=dev))[..., None].clamp_min(p["min_y"])
+        ratio = p.get("tint_sat", p["sat"])
+        gr = (1 - ratio) / (2 * ratio)
+        r = lum / (0.2126 + 0.7874 * gr)
+        red = torch.cat([r * gr, r * gr, r], -1).clamp(0, 1)
+        rho = st * w
+        aw = act * w
+        off = x * (1 - aw * p["desat"]) + lum.expand_as(x) * aw * p["desat"]
+        return _tu8(off * (1 - rho) + red * rho)
+    # pattern
+    pat = torch.as_tensor(plum / W_CD, device=dev, dtype=torch.float32)[None, ..., None]
+    base = (1 - p["keep"]) * pat + p["keep"] * x
+    ww = w * st
+    return _tu8(x * (1 - ww) + base * ww)
+
+
 def pattern_lum(kind: str, h: int, w: int, cpd: float, lo: float, hi: float, rng) -> np.ndarray:
     """무늬 휘도(cd/m²) H×W. 물결(wavy)만 여기서 직접 만들고 나머지는 stripe_freq.render_pattern."""
     ppd = measure.pixels_per_degree(w, h, 0.0)
@@ -426,8 +492,11 @@ def sample_recipe(kind: str, intent: str, seed: int, n: int, fps: float) -> dict
         r["mode"] = str(rng.choice(["pair", "tint"]))
         sat = float(rng.uniform(0.86, 0.97)) if r.get("near") != "weak" else float(rng.uniform(0.55, 0.7))
         r["sat"] = sat
-        r["tint_sat"] = float(rng.uniform(0.95, 0.99)) if r.get("near") != "weak" else sat   # 물들이기는 더 진한 빨강(u′ ≈ 0.42~0.45)
-        r["desat"] = float(rng.uniform(0.5, 1.0))
+        r["tint_sat"] = float(rng.uniform(0.985, 0.997)) if r.get("near") != "weak" else sat   # 물들이기는 더 진한 빨강(u′ ≈ 0.45 이상)
+        r["desat"] = float(rng.uniform(0.85, 1.0))
+        # 적색 전환은 한 프레임 안에: 팀원 판별기는 66.8 ms 안의 색도 변화만 전이로 센다(24 fps 에선 바로 옆 프레임뿐).
+        # 시간 흐림(σ)을 주면 Δu′v′ 가 프레임 여럿에 나뉘어 0.2 를 못 넘는다(d3: 적색 실패 11개 모두 물들이기 + σ>0 또는 색도 차 0.19)
+        r["sigma"] = 0.0
         r["min_y"] = float(rng.uniform(0.03, 0.12))
         try:
             pr = oracle.red_pair(sat, float(rng.uniform(0.24, 0.45)), y_rel=float(rng.uniform(0.04, 0.16)))
@@ -437,8 +506,11 @@ def sample_recipe(kind: str, intent: str, seed: int, n: int, fps: float) -> dict
     return r
 
 
-def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
-    """레시피 → (영상 T×H×W×3 uint8 BGR, 합성 영역 가중 T×H×W float — 바뀐 곳). clean 은 n 프레임 이상."""
+def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=None) -> tuple[np.ndarray, np.ndarray]:
+    """레시피 → (영상 T×H×W×3 uint8 BGR, 합성 영역 가중 T×H×W float — 바뀐 곳). clean 은 n 프레임 이상.
+
+    device(torch, 예: 'cuda') 를 주면 섞기를 GPU 에서 한다(마스크·무늬 만들기는 CPU). numpy 경로와 sRGB 반올림 차이 ±1 이내.
+    """
     rng = np.random.default_rng(r["seed"] + 7)
     n, (h, w) = r["n"], clean.shape[1:3]
     clean = clean[:n]
@@ -469,6 +541,16 @@ def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None) -> tuple
         c = slice(c0, min(n, c0 + 24))
         ac = a[c] if a.ndim == 3 else a
         p = dict(r); p["active"] = active[c]
+        if device is not None:                                  # GPU 섞기
+            if kind in ("scene", "intersection") and r["mode"] == "cut":
+                out[c] = mix_torch("scene_cut", "cut", clean[c], None, s[c], p, device, other=oth[c])
+            elif kind in ("lum_flash", "lum_ext", "scene", "intersection"):
+                out[c] = mix_torch("lum", r["mode"], clean[c], ac, s[c], p, device)
+            elif kind in ("red_flash", "red_ext"):
+                out[c] = mix_torch("red", r["mode"], clean[c], ac, s[c], p, device)
+            else:
+                out[c] = mix_torch("pattern", "", clean[c], ac, s[c], p, device, plum=plum)
+            continue
         if kind in ("lum_flash", "lum_ext") or (kind in ("scene", "intersection") and r["mode"] in ("add", "gain", "flat")):
             out[c] = lum_modulate(clean[c], ac, s[c], r["mode"], r)
         elif kind in ("scene", "intersection"):

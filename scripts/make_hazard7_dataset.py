@@ -1,6 +1,11 @@
 """7종 위험 라벨 합성 데이터 (src/lumi_synth/hazard7.py) — 만들고, mp4 로 저장하고, 다시 디코드해서 판별기로 라벨을 붙인다.
 
     python scripts/make_hazard7_dataset.py --team-dir <lumi-lab-rockrovks> --split val --per 6 --name t1
+    python scripts/make_hazard7_dataset.py ... --phase gen      # 생성만 (GPU = 섞기)
+    python scripts/make_hazard7_dataset.py ... --phase judge    # 판정만 (GPU = 팀원 판별기 한 프로세스, CPU = 우리 판정기)
+
+두 단계로 나눈다: 생성 단계에서는 GPU 로 섞고, 판정 단계에서는 GPU 를 판별기가 쓴다(서로 GPU 를 다투지 않음).
+판정 기준이 바뀌면 --phase judge 만 다시 돌려 라벨을 새로 붙인다(영상은 그대로). 각 단계는 이어 하기가 된다.
 
 - 바탕: Big Buck Bunny 1080p 의 8초 구간(24 fps, 768×432). train 30~420 s · val 450~560 s (기존 분할과 같은 구간),
   test = Sintel(data/raw/sintel) 앞부분 제외 구간. 장면 컷용 '다른 장면'도 같은 분할에서 뽑는다.
@@ -111,46 +116,56 @@ def ours_judge(frames: np.ndarray) -> dict:
             "lum_peak_area": float(r["peak_area"]), "red_max_flashes": float(rr["max_flashes"])}
 
 
-def one(job):
-    sid, kind, intent, seed, split, out_dir, team_dir, variant = job
-    global VARIANT
-    VARIANT = variant
+def gen_one(job):
+    """1단계(생성): 바탕 디코드(CPU) → 마스크(CPU) → 섞기(GPU) → mp4 인코딩(CPU). 바탕만 인코딩한 것도 저장(판정 단계에서 뺄셈용)."""
+    sid, kind, intent, seed, split, out_dir, device = job
     t0 = time.time()
     try:
         rng = np.random.default_rng(seed)
         clean, start = bg_clip(split, rng)
         other, start2 = bg_clip(split, rng) if kind in ("scene", "intersection") else (None, None)
         r = hazard7.sample_recipe(kind, intent, seed, N, FPS)
-        out, a = hazard7.render(r, clean, other)
-        mp4 = Path(out_dir) / f"{sid}.mp4"
-        encode(out, mp4)
-        dec = decode(mp4)
-        tj = team_judge(dec, team_dir)
-        oj = ours_judge(dec)
-        # 바탕만(같은 인코딩)도 판별 — 팀원 판별기가 손대지 않은 바탕에서도 '정적 공간 패턴' 등을 내므로, 합성으로 '새로 생긴' 라벨을 따로 센다
-        cmp4 = Path(out_dir) / f"{sid}.clean_tmp.mp4"
-        encode(clean, cmp4)
-        cj = team_judge(decode(cmp4), team_dir)
-        cmp4.unlink()
-        added = tj["masks"] & ~cj["masks"]
-        extra = {"weight": tj["weight"]} if tj["weight"] is not None else {}
-        np.savez_compressed(Path(out_dir) / f"{sid}.labels.npz", team=tj["masks"], clean=cj["masks"], added=added,
-                            labels=np.array(hazard7.LABELS), **extra)
-        target = hazard7.KIND_LABEL[kind]
-        ti = hazard7.LABELS.index(target)
-        min_added = 12 if kind == "pattern" else 1                # 무늬는 0.5 s 이상 새로 생겨야
-        added_labels = [l for l, a_ in zip(hazard7.LABELS, added) if a_.sum() >= (12 if l == hazard7.LABELS[-1] else 1)]
+        dev = None
+        if device != "cpu":
+            import torch
+            dev = torch.device(device)
+        out, a = hazard7.render(r, clean, other, device=dev)
+        encode(out, Path(out_dir) / f"{sid}.mp4")
+        encode(clean, Path(out_dir) / f"{sid}.clean.mp4")
         r = {k: (v if not isinstance(v, np.generic) else v.item()) for k, v in r.items()}
-        return {"id": sid, "split": split, "kind": kind, "intent": intent, "target_label": target, "recipe": r,
+        return {"id": sid, "split": split, "kind": kind, "intent": intent, "target_label": hazard7.KIND_LABEL[kind], "recipe": r,
                 "bg": {"start": round(start, 3), "other_start": None if start2 is None else round(start2, 3)},
-                "region_mean": round(float(a.mean()), 4),
-                "team": {"labels": tj["labels"], "dangerous": tj["dangerous"],
-                         "frames": {l: int(m.sum()) for l, m in zip(hazard7.LABELS, tj["masks"])}},
-                "clean_labels": cj["labels"], "added_labels": added_labels,
-                "judge": variant, "ours": oj, "hit": target in tj["labels"], "hit_added": bool(added[ti].sum() >= min_added), "sec": round(time.time() - t0, 1)}
+                "region_mean": round(float(a.mean()), 4), "gen_device": device, "gen_sec": round(time.time() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         import traceback
         return {"id": sid, "kind": kind, "intent": intent, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-1200:]}
+
+
+def ours_one(path_s: str) -> dict:
+    """2단계의 CPU 몫: 우리 판정기(휘도·적색·IRIS 연장)."""
+    return ours_judge(decode(Path(path_s)))
+
+
+def judge_rows(g: dict, out_dir: Path, team_dir: str, variant: str, ours: dict) -> dict:
+    """2단계의 GPU 몫: 팀원 판별기를 합성본·바탕에 → 라벨, 새로 생긴 라벨, 픽셀 위험 마스크."""
+    global VARIANT
+    VARIANT = variant
+    sid, kind = g["id"], g["kind"]
+    tj = team_judge(decode(out_dir / f"{sid}.mp4"), team_dir)
+    # 바탕만도 판별 — 팀원 판별기가 손대지 않은 바탕에서도 '정적 공간 패턴' 등을 내므로, 합성으로 '새로 생긴' 라벨을 따로 센다
+    cj = team_judge(decode(out_dir / f"{sid}.clean.mp4"), team_dir)
+    added = tj["masks"] & ~cj["masks"]
+    extra = {"weight": tj["weight"]} if tj["weight"] is not None else {}
+    np.savez_compressed(out_dir / f"{sid}.labels.npz", team=tj["masks"], clean=cj["masks"], added=added,
+                        labels=np.array(hazard7.LABELS), **extra)
+    target = hazard7.KIND_LABEL[kind]
+    ti = hazard7.LABELS.index(target)
+    min_added = 12 if kind == "pattern" else 1                    # 무늬는 0.5 s 이상 새로 생겨야
+    added_labels = [l for l, a_ in zip(hazard7.LABELS, added) if a_.sum() >= (12 if l == hazard7.LABELS[-1] else 1)]
+    return {**g, "team": {"labels": tj["labels"], "dangerous": tj["dangerous"],
+                          "frames": {l: int(m.sum()) for l, m in zip(hazard7.LABELS, tj["masks"])}},
+            "clean_labels": cj["labels"], "added_labels": added_labels, "judge": variant, "ours": ours,
+            "hit": target in tj["labels"], "hit_added": bool(added[ti].sum() >= min_added)}
 
 
 def report(rows: list[dict], path: Path, title: str) -> None:
@@ -218,28 +233,54 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--variant", default="partial", choices=("partial", "fullscreen"),
                     help="팀원 판별기: Partial/B2 vdcoreps(기본, 7라벨 + 픽셀 위험 마스크) 또는 Fullscreen/B2 vdcorefs")
+    ap.add_argument("--phase", default="all", choices=("gen", "judge", "all"),
+                    help="gen: 합성(GPU)·인코딩만 · judge: 판정만(팀원 판별기 GPU 한 프로세스 + 우리 판정기 CPU 병렬) · all: 차례로")
+    ap.add_argument("--gen-device", default="cuda", help="합성(섞기) 장치. cpu 면 numpy")
     a = ap.parse_args()
     out = ROOT / "data" / "hazard7" / a.name / a.split
     out.mkdir(parents=True, exist_ok=True)
-    man = out / "manifest.jsonl"
-    done = {json.loads(l)["id"] for l in man.read_text(encoding="utf-8").splitlines() if l.strip()} if man.exists() else set()
-    base = {"train": 0, "val": 1_000_000, "test": 2_000_000}[a.split] + a.seed * 100_000
-    jobs = []
-    for ki, kind in enumerate(a.kinds):
-        for intent in ("hazard", "near"):
-            for i in range(a.per):
-                sid = f"{a.split}_{kind}_{intent}_{i:03d}"
-                seed = base + hazard7.KINDS.index(kind) * 10_000 + (0 if intent == "hazard" else 5_000) + i
-                if sid not in done:
-                    jobs.append((sid, kind, intent, seed, a.split, str(out), a.team_dir, a.variant))
-    print(f"만들 표본 {len(jobs)}개 (이미 {len(done)}개) → {out}", flush=True)
+    gen_man, man = out / "gen.jsonl", out / "manifest.jsonl"
+    read = lambda p: [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()] if p.exists() else []
     t0 = time.time()
-    with cf.ProcessPoolExecutor(a.workers) as ex, man.open("a", encoding="utf-8") as f:
-        for i, r in enumerate(ex.map(one, jobs), 1):
-            f.write(json.dumps(r, ensure_ascii=False) + "\n"); f.flush()
-            if "error" in r or i % 10 == 0:
-                print(f"  {i}/{len(jobs)} ({time.time() - t0:.0f}초) {r['id']} {r.get('error', '적중' if r.get('hit') else '')}", flush=True)
-    rows = [json.loads(l) for l in man.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+    if a.phase in ("gen", "all"):                     # ---- 1단계: 생성 (GPU 는 섞기에)
+        done = {r["id"] for r in read(gen_man) if "error" not in r}
+        base = {"train": 0, "val": 1_000_000, "test": 2_000_000}[a.split] + a.seed * 100_000
+        jobs = []
+        for kind in a.kinds:
+            for intent in ("hazard", "near"):
+                for i in range(a.per):
+                    sid = f"{a.split}_{kind}_{intent}_{i:03d}"
+                    seed = base + hazard7.KINDS.index(kind) * 10_000 + (0 if intent == "hazard" else 5_000) + i
+                    if sid not in done:
+                        jobs.append((sid, kind, intent, seed, a.split, str(out), a.gen_device))
+        print(f"[생성] {len(jobs)}개 (이미 {len(done)}개) · 섞기 {a.gen_device} · 작업자 {a.workers} → {out}", flush=True)
+        with cf.ProcessPoolExecutor(a.workers) as ex, gen_man.open("a", encoding="utf-8") as f:
+            for i, r in enumerate(ex.map(gen_one, jobs), 1):
+                f.write(json.dumps(r, ensure_ascii=False) + "\n"); f.flush()
+                if "error" in r or i % 10 == 0:
+                    print(f"  생성 {i}/{len(jobs)} ({time.time() - t0:.0f}초) {r['id']} {r.get('error', '')}", flush=True)
+
+    if a.phase in ("judge", "all"):                   # ---- 2단계: 판정 (GPU 는 팀원 판별기에)
+        gens = {r["id"]: r for r in read(gen_man) if "error" not in r}
+        done = {r["id"] for r in read(man) if "error" not in r}
+        todo = [g for sid, g in sorted(gens.items()) if sid not in done]
+        print(f"[판정] {len(todo)}개 (이미 {len(done)}개) · 팀원 {a.variant} B2 GPU 1 프로세스 · 우리 판정기 CPU {a.workers}", flush=True)
+        t1 = time.time()
+        with cf.ProcessPoolExecutor(a.workers) as ex, man.open("a", encoding="utf-8") as f:
+            futs = {g["id"]: ex.submit(ours_one, str(out / f"{g['id']}.mp4")) for g in todo}   # CPU: 우리 판정기
+            for i, g in enumerate(todo, 1):
+                try:
+                    row = judge_rows(g, out, a.team_dir, a.variant, futs[g["id"]].result())     # GPU: 팀원 판별기
+                except Exception as e:  # noqa: BLE001
+                    import traceback
+                    row = {**g, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-1200:]}
+                f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
+                if "error" in row or i % 10 == 0:
+                    print(f"  판정 {i}/{len(todo)} ({time.time() - t1:.0f}초) {row['id']} {row.get('error', '적중' if row.get('hit_added') else '')}", flush=True)
+    rows = read(man)
+    if not rows:
+        return
     rep = ROOT / "checks" / "hazard7" / f"{a.name}_{a.split}.md"
     report(rows, rep, f"{a.name} / {a.split}")
     print("보고서:", rep, flush=True)
