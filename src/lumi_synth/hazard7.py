@@ -461,17 +461,21 @@ def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None) -> tuple
         a = feather(m, min(r["feather"], 2.0))
     else:
         a = dynamic_region(r, clean, s, rng)
-    if kind in ("lum_flash", "lum_ext") or (kind in ("scene", "intersection") and r["mode"] in ("add", "gain", "flat")):
-        out = lum_modulate(clean, a, s, r["mode"], r)
-    elif kind in ("scene", "intersection"):
-        p = dict(r)
-        p["active"] = np.zeros(n, np.float32); p["active"][r["t0"]:r["t1"]] = 1
-        out = scene_cut(clean, other[:n] if other is not None else clean[::-1], s, p)
-    elif kind in ("red_flash", "red_ext"):
-        p = dict(r)
-        p["active"] = np.zeros(n, np.float32); p["active"][r["t0"]:r["t1"]] = 1
-        out = red_modulate(clean, a, s, r["mode"], p)
-    else:
-        out = pattern_overlay(clean, a, plum, s, r["keep"])
+    active = np.zeros(n, np.float32); active[r["t0"]:r["t1"]] = 1
+    oth = (other[:n] if other is not None else clean[::-1]) if kind in ("scene", "intersection") else None
+    out = np.empty_like(clean)
+    # 프레임 24장씩 섞는다 — 8 s 전체를 float 로 한꺼번에 만들면 프로세스당 수~십수 GB 를 써서 메모리가 모자랐다(2026-11-20)
+    for c0 in range(0, n, 24):
+        c = slice(c0, min(n, c0 + 24))
+        ac = a[c] if a.ndim == 3 else a
+        p = dict(r); p["active"] = active[c]
+        if kind in ("lum_flash", "lum_ext") or (kind in ("scene", "intersection") and r["mode"] in ("add", "gain", "flat")):
+            out[c] = lum_modulate(clean[c], ac, s[c], r["mode"], r)
+        elif kind in ("scene", "intersection"):
+            out[c] = scene_cut(clean[c], oth[c], s[c], p)
+        elif kind in ("red_flash", "red_ext"):
+            out[c] = red_modulate(clean[c], ac, s[c], r["mode"], p)
+        else:
+            out[c] = pattern_overlay(clean[c], ac, plum, s[c], r["keep"])
     aa = a if a.ndim == 3 else np.broadcast_to(a, (n, h, w))
     return out, aa
