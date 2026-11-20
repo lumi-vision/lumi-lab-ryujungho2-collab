@@ -351,7 +351,7 @@ def main():
         for kind in a.kinds:
             for intent in ("hazard", "near"):
                 for i in range(a.per):
-                    sid = f"{a.split}_{kind}_{intent}_{i:03d}"
+                    sid = f"{a.split}_{kind}_{intent}_{i:03d}" if a.seed == 0 else f"{a.split}_s{a.seed}_{kind}_{intent}_{i:03d}"   # 추가 묶음(--seed k)은 id 가 겹치지 않게
                     seed = base + hazard7.KINDS.index(kind) * 10_000 + (0 if intent == "hazard" else 5_000) + i
                     if sid not in done:
                         jobs.append((sid, kind, intent, seed, a.split, str(out), a.gen_device))
