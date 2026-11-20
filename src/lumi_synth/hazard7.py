@@ -456,7 +456,7 @@ def sample_phys_states(kind: str, near: str | None, rng) -> dict:
     """
     if kind in ("red_flash", "red_ext"):
         ratio = float(rng.uniform(0.86, 0.99)) if near != "weak" else float(rng.uniform(0.55, 0.75))
-        red, Lr = red_color(float(np.exp(rng.uniform(np.log(3), np.log(45)))), ratio)
+        red, Lr = red_color(float(np.exp(rng.uniform(np.log(10), np.log(45)))), ratio)   # 10 cd 미만은 R−G−B < 0.0625(#470000 하한)에 걸림(d5)
         partner = str(rng.choice(["black", "white", "hue"], p=[0.4, 0.25, 0.35]))
         if partner == "black":
             other, Lo = phys_color(float(rng.uniform(0.0, 3.0)), 0, 0)
@@ -662,7 +662,7 @@ def sample_recipe(kind: str, intent: str, seed: int, n: int, fps: float) -> dict
             r["mode"] = "phys"
             st = sample_phys_states(kind, r.get("near"), rng)
             r["states"] = st
-            r["alpha"] = float(rng.uniform(0.92, 1.0)) if kind.startswith("red") else float(rng.uniform(0.75, 1.0))
+            r["alpha"] = float(rng.uniform(0.97, 1.0)) if kind.startswith("red") else float(rng.uniform(0.75, 1.0))
             r["sigma"] = 0.0
         if kind in ("lum_flash", "red_flash", "intersection") and r.get("near") != "slow":
             r["rhythm"] = str(rng.choice(["regular", "asym", "burst"], p=[0.3, 0.35, 0.35]))
