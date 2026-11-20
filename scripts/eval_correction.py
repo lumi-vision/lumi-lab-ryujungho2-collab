@@ -139,7 +139,7 @@ def team_judge(frames: np.ndarray, team_dir: str) -> dict:
     m.VARIANT = "partial"
     j = m.team_judge(frames, team_dir)
     wm = j["weight"]
-    j["weight_full"] = None if wm is None else np.stack([cv2.resize(f, (W, H), interpolation=cv2.INTER_LINEAR) for f in wm]).astype(np.float32) / 255.0
+    j["weight_full"] = None if wm is None else np.stack([cv2.resize(f, (frames.shape[2], frames.shape[1]), interpolation=cv2.INTER_LINEAR) for f in wm]).astype(np.float32) / 255.0
     return j
 
 
@@ -172,7 +172,10 @@ def main():
     ap.add_argument("--baselines", nargs="*", default=["B0", "B0v", "B1", "B2", "B3", "B4"])
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--tag", default="")
+    ap.add_argument("--real", default="", choices=("", "kaya"), help="kaya: 실제 위험 영상 22 개(원본 없음)")
     a = ap.parse_args()
+    if a.real:
+        return main_real(a)
     d = ROOT / "data" / "hazard7" / a.data / a.split
     rows_g = {json.loads(l)["id"]: json.loads(l) for q in sorted(d.glob("manifest*.jsonl")) for l in q.read_text(encoding="utf-8").splitlines() if l.strip()}
     ids = sorted(k for k, r in rows_g.items() if "error" not in r)
@@ -237,6 +240,147 @@ def main():
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
             print(f"  {i}/{len(ids)} {sid}", flush=True)
     report(out_rows, ROOT / "checks" / "correction" / f"eval_{a.split}_{tag}.md", methods)
+
+
+# ---------------- 실제 영상 (Kaya 2025 원본 22 개, 원본 없음) ----------------
+
+def model_correct_long(name: str, x: np.ndarray, chunk: int = 192, over: int = 48) -> np.ndarray:
+    """긴 영상: 192 프레임 조각(48 겹침)으로 나눠 보정하고 겹친 곳은 선형으로 섞는다. 임의 해상도 → 384×216 에서 추론."""
+    n, h, w = x.shape[:3]
+    if n <= chunk:
+        return model_correct_res(name, x)
+    acc = np.zeros((n, h, w, 3), np.float32)
+    wsum = np.zeros((n, 1, 1, 1), np.float32)
+    s = 0
+    while s < n:
+        e = min(n, s + chunk)
+        s0 = max(0, e - chunk)
+        y = model_correct_res(name, x[s0:e]).astype(np.float32)
+        wt = np.ones(e - s0, np.float32)
+        r = min(over, e - s0)
+        if s0 > 0:
+            wt[:r] = np.linspace(0, 1, r)
+        acc[s0:e] += y * wt[:, None, None, None]
+        wsum[s0:e, 0, 0, 0] += wt
+        if e == n:
+            break
+        s = e - over
+    return (acc / np.maximum(wsum, 1e-6)).round().clip(0, 255).astype(np.uint8)
+
+
+def model_correct_res(name: str, x: np.ndarray) -> np.ndarray:
+    """model_correct 의 임의 해상도판(보정량을 입력 해상도로 키움)."""
+    global H, W
+    h0, w0 = H, W
+    H, W = x.shape[1], x.shape[2]
+    try:
+        return model_correct(name, x)
+    finally:
+        H, W = h0, w0
+
+
+def main_real(a) -> None:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from eval_real_hazards import decode as dec_any
+    files = sorted((ROOT / "data" / "real" / "kaya2025" / "extracted").glob("*.*"), key=lambda p: int(p.stem) if p.stem.isdigit() else 999)
+    files = [p for p in files if p.suffix.lower() in (".mp4", ".avi")]
+    if a.limit:
+        files = files[:a.limit]
+    tag = a.tag or "_".join(a.models) or "baselines"
+    out_rows = ROOT / "checks" / "correction" / f"eval_kaya_{tag}_rows.jsonl"
+    done = {(json.loads(l)["file"], json.loads(l)["method"]) for l in out_rows.read_text(encoding="utf-8").splitlines() if l.strip()} if out_rows.exists() else set()
+    methods = [m for m in a.baselines if m not in ("B0v",)] + a.models
+    tmp = ROOT / "data" / "correction" / "tmp_eval"
+    import make_hazard7_dataset as mk
+    print(f"Kaya {len(files)} · 방법 {methods}", flush=True)
+    with out_rows.open("a", encoding="utf-8") as f:
+        for i, p in enumerate(files, 1):
+            todo = [m for m in methods if (p.name, m) not in done]
+            if not todo:
+                continue
+            x, fps = dec_any(p)                                        # 가로 640 이하
+            mk.FPS = fps                                               # 판별기에 원래 fps
+            tj0 = team_judge(x, a.team_dir)
+            lab0 = sorted(tj0["labels"])
+            xl = LUT[x]
+            dl0 = float(np.abs(np.diff(xl.mean(-1), axis=0)).mean())
+            for m in todo:
+                t0 = time.time()
+                try:
+                    if m == "B0":
+                        y = x
+                    elif m == "B1":
+                        y = b1_global(x, tj0)
+                    elif m == "B2":
+                        src = tmp.with_name(f"kaya_{p.stem}_in.mp4")
+                        encode_any(x, src, fps)
+                        y = b2_partial(src, tmp, a.team_dir)
+                        src.unlink(missing_ok=True)
+                    elif m == "B3":
+                        y = b3_local(x, tj0)
+                    elif m == "B4":
+                        y = b4_flashguard(x)
+                    else:
+                        y = model_correct_long(m, x)
+                    sec = time.time() - t0
+                    n = min(len(x), len(y)); y = y[:n]
+                    tj = team_judge(y, a.team_dir)
+                    oj = ours_judge_fps(y, fps)
+                    lp = quality.lpips_map(y[:n:8], x[:n:8])
+                    ev = np.ones(y.shape[:3], bool)
+                    row = {"file": p.name, "method": m, "fps": round(fps, 2), "frames": n, "labels_before": lab0,
+                           "labels_after": sorted(tj["labels"]),
+                           "flash_labels_after": sorted(l for l in tj["labels"] if l != "정적 공간 패턴"),
+                           "safe_team": not tj["labels"], "safe_team_flash": not [l for l in tj["labels"] if l != "정적 공간 패턴"],
+                           "safe_ours": not (oj["lum"] or oj["red"] or oj["ext_lum"] or oj["ext_red"]),
+                           "lpips_vs_input": round(float(lp.mean()), 4), "psnr_vs_input": round(quality.psnr(y, x[:n], ev), 3),
+                           "flicker_ratio": round(float(np.abs(np.diff(LUT[y].mean(-1), axis=0)).mean()) / max(dl0, 1e-6), 4),
+                           "sec": round(sec, 2)}
+                except Exception as e:  # noqa: BLE001
+                    import traceback
+                    row = {"file": p.name, "method": m, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]}
+                f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
+            print(f"  {i}/{len(files)} {p.name}", flush=True)
+    report_real(out_rows, ROOT / "checks" / "correction" / f"eval_kaya_{tag}.md", methods)
+
+
+def encode_any(x: np.ndarray, path: Path, fps: float) -> None:
+    import av
+    with av.open(str(path), "w") as c:
+        st = c.add_stream("libx264", rate=max(1, int(round(fps))))
+        st.width, st.height, st.pix_fmt = x.shape[2] // 2 * 2, x.shape[1] // 2 * 2, "yuv420p"
+        st.options = {"crf": "12"}
+        for fr in x:
+            for pk in st.encode(av.VideoFrame.from_ndarray(np.ascontiguousarray(fr[:st.height, :st.width]), format="bgr24")):
+                c.mux(pk)
+        for pk in st.encode():
+            c.mux(pk)
+
+
+def ours_judge_fps(y: np.ndarray, fps: float) -> dict:
+    from lumi_synth import measure
+    r = measure.analyze(y, fps); rr = measure.analyze_red(y, fps)
+    return {"lum": bool(r["dangerous"]), "red": bool(rr["dangerous"]),
+            "ext_lum": bool(measure.extended_flash(r["transitions"], fps)["extended_dangerous"]),
+            "ext_red": bool(measure.extended_flash(rr["transitions"], fps)["extended_dangerous"])}
+
+
+def report_real(rows_path: Path, out: Path, methods: list) -> None:
+    rows = [json.loads(l) for l in rows_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = [r for r in rows if "error" not in r]
+    med = lambda v: float(np.nanmedian(v)) if v else float("nan")
+    L = [f"# 실제 위험 영상(Kaya 2025 원본) 보정 — {rows_path.stem.replace('_rows', '')}", "",
+         f"> {time.strftime('%Y-%m-%d %H:%M')} · 원본(정답) 없음 → 보정 전후 재판정과 '입력을 얼마나 바꿨나'만 · 깜빡임 라벨 = 정적 공간 패턴을 뺀 6종(패턴은 판별기 오탐이 많음)", "",
+         "| 방법 | n | 안전(팀원, 7라벨) | 안전(팀원, 깜빡임 6라벨) | 안전(우리) | LPIPS 입력 대비 | PSNR 입력 대비 | 프레임 간 변화 비율 | 초 |",
+         "|---|---|---|---|---|---|---|---|---|"]
+    for m in methods:
+        rs = [r for r in rows if r["method"] == m]
+        if rs:
+            L.append(f"| {m} | {len(rs)} | {sum(r['safe_team'] for r in rs)}/{len(rs)} | {sum(r['safe_team_flash'] for r in rs)}/{len(rs)} | "
+                     f"{sum(r['safe_ours'] for r in rs)}/{len(rs)} | {med([r['lpips_vs_input'] for r in rs]):.3f} | "
+                     f"{med([r['psnr_vs_input'] for r in rs if np.isfinite(r['psnr_vs_input'])]):.2f} | {med([r['flicker_ratio'] for r in rs]):.3f} | {med([r['sec'] for r in rs]):.1f} |")
+    out.write_text("\n".join(L) + "\n", encoding="utf-8")
+    print("보고서:", out, flush=True)
 
 
 def report(rows_path: Path, out: Path, methods: list) -> None:
