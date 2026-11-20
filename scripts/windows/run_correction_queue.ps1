@@ -22,8 +22,12 @@ foreach ($r in $runs) {
   $name = $r[0]
   $extra = @()
   if ($r.Count -gt 1) { $extra = $r[1..($r.Count - 1)] }
-  Log "train $name $($extra -join ' ')"
-  $argv = @("-u", "scripts\train_correction.py", "--run", $name, "--data", $Data) + $extra
-  Start-Process -FilePath $py -ArgumentList $argv -NoNewWindow -Wait -RedirectStandardOutput "$logdir\$name.log" -RedirectStandardError "$logdir\$name.err"
+  for ($try = 1; $try -le 4; $try++) {
+    if (Test-Path "data\correction\$name.done") { break }
+    Log "train $name try $try $($extra -join ' ')"
+    $argv = @("-u", "scripts\train_correction.py", "--run", $name, "--data", $Data) + $extra
+    if ($try -gt 1) { $argv += "--resume" }
+    Start-Process -FilePath $py -ArgumentList $argv -NoNewWindow -Wait -RedirectStandardOutput "$logdir\${name}_try$try.log" -RedirectStandardError "$logdir\${name}_try$try.err"
+  }
 }
 Log "done"

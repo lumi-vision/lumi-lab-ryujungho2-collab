@@ -183,7 +183,10 @@ def main():
     ap.add_argument("--val-limit", type=int, default=70, help="검증 표본 수(고르게 뽑아 고정)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--resume", action="store_true", help="data/correction/<run>.last.pt 에서 이어 학습(옵티마이저·난수·기록 포함)")
+    ap.add_argument("--mem-frac", type=float, default=0.85, help="GPU 메모리 상한 — 넘으면 시스템 메모리로 넘쳐 몇 배 느려지는 대신 오류를 내고 그 단계를 건너뛴다")
     a = ap.parse_args()
+    torch.cuda.set_per_process_memory_fraction(a.mem_frac)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
     dev = torch.device("cuda")
@@ -196,7 +199,8 @@ def main():
     out_dir, chk = ROOT / "data" / "correction", ROOT / "checks" / "correction"
     out_dir.mkdir(parents=True, exist_ok=True); chk.mkdir(parents=True, exist_ok=True)
     ckpt = out_dir / f"{a.run}.pt"
-    if ckpt.exists() and not a.overwrite and not a.limit:
+    last = out_dir / f"{a.run}.last.pt"
+    if ckpt.exists() and not a.overwrite and not a.limit and not a.resume:
         raise SystemExit(f"{ckpt} 가 이미 있습니다(--overwrite)")
     net = CorrNet(dim=a.dim, depth=a.depth, use_attn=not a.no_attn, use_phys=not a.no_phys).to(dev)
     n_par = sum(p.numel() for p in net.parameters())
@@ -209,21 +213,42 @@ def main():
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=max(1, a.patience // 2))
     print(f"학습 {len(tr_ids)} · 검증 {len(va_ids)} · 매개변수 {n_par / 1e6:.2f}M · 자르기 {a.crop} · 어텐션 {not a.no_attn} · 역산 {not a.no_phys}", flush=True)
+    best, best_ep, bad, hist, start = float("inf"), 0, 0, [], 1
+    if a.resume and last.exists():                         # 이어 하기: 마지막 epoch 끝 상태 그대로
+        st = torch.load(last, map_location=dev, weights_only=False)
+        net.load_state_dict(st["model"]); opt.load_state_dict(st["opt"]); sched.load_state_dict(st["sched"])
+        best, best_ep, bad, hist, start = st["best"], st["best_ep"], st["bad"], st["hist"], st["epoch"] + 1
+        rng.bit_generator.state = st["rng"]; torch.set_rng_state(st["torch_rng"].cpu())
+        print(f"이어 하기: epoch {start} 부터 (가장 좋은 epoch {best_ep})", flush=True)
     log = (chk / f"{a.run}_log.jsonl").open("w", encoding="utf-8")
-    best, best_ep, bad, hist = float("inf"), 0, 0, []
-    t0 = time.time()
-    for ep in range(1, a.max_epochs + 1):
+    for h in hist:
+        log.write(json.dumps(h, ensure_ascii=False) + "\n")
+    t0 = time.time() - (hist[-1]["elapsed_s"] if hist else 0)
+    skipped = 0
+    for ep in range(start, a.max_epochs + 1):
+        if bad >= a.patience:
+            break
         order = [tr_ids[i] for i in rng.permutation(len(tr_ids))[:a.epoch_size or None]]
         tl, tparts = [], {}
+        t_wait = t_step = 0.0
+        tw = time.time()
         for i, it in enumerate(loader(base / "train", order), 1):
-            b = to_tensors(it, dev, tuple(a.crop), rng)
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                o = net(b["X"])
-            loss, parts = compute_loss(o, b, a, lp)
-            opt.zero_grad(set_to_none=True)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
-            opt.step()
+            t_wait += time.time() - tw
+            ts = time.time()
+            try:
+                b = to_tensors(it, dev, tuple(a.crop), rng)
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    o = net(b["X"])
+                loss, parts = compute_loss(o, b, a, lp)
+                opt.zero_grad(set_to_none=True)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
+                opt.step()
+            except torch.OutOfMemoryError:                 # 다른 프로그램이 GPU 를 쓰는 동안 등: 이 단계만 건너뜀
+                opt.zero_grad(set_to_none=True); torch.cuda.empty_cache(); skipped += 1
+                tw = time.time()
+                continue
+            torch.cuda.synchronize(); t_step += time.time() - ts; tw = time.time()
             tl.append(float(loss.detach()))
             for k, v in parts.items():
                 tparts.setdefault(k, []).append(v)
@@ -233,7 +258,8 @@ def main():
         sched.step(va["loss"])
         rec = {"epoch": ep, "train_loss": round(float(np.mean(tl)), 5), "train": {k: round(float(np.mean(v)), 5) for k, v in tparts.items()},
                "val": va, "lr": opt.param_groups[0]["lr"], "elapsed_s": round(time.time() - t0, 1),
-               "gpu_peak_GB": round(torch.cuda.max_memory_allocated() / 2 ** 30, 1)}
+               "gpu_peak_GB": round(torch.cuda.max_memory_allocated() / 2 ** 30, 1),
+               "sec_data_wait": round(t_wait, 1), "sec_gpu_step": round(t_step, 1), "skipped_oom_total": skipped}
         if va["loss"] < best - a.min_delta:
             best, best_ep, bad = va["loss"], ep, 0
             torch.save({"model": net.state_dict(), "config": vars(a) | {"epoch": ep, "n_params": n_par}}, ckpt)
@@ -244,10 +270,14 @@ def main():
         log.write(json.dumps(rec, ensure_ascii=False) + "\n"); log.flush()
         print(f"[{ep}] 학습 {rec['train_loss']:.4f} · 검증 {va['loss']:.4f} · 복원 PSNR {va['psnr_rec']:.2f} dB"
               f"{' ★' if rec.get('best') else f' ({bad}/{a.patience})'} · {rec['elapsed_s']:.0f}초", flush=True)
+        torch.save({"model": net.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(), "epoch": ep,
+                    "best": best, "best_ep": best_ep, "bad": bad, "hist": hist, "rng": rng.bit_generator.state,
+                    "torch_rng": torch.get_rng_state()}, last)
         if bad >= a.patience:
             print(f"조기 종료 → epoch {best_ep}", flush=True)
             break
     plot(hist, chk / f"{a.run}_curves.png", best_ep)
+    (out_dir / f"{a.run}.done").write_text(json.dumps({"best_epoch": best_ep, "epochs": len(hist)}), encoding="utf-8")
     print("저장:", ckpt, flush=True)
 
 
