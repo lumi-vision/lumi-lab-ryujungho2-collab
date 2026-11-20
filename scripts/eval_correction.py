@@ -4,7 +4,7 @@
     python scripts/eval_correction.py --team-dir ... --split test --models h_s0 h_s1 h_s2 abl_noattn ...
 
 방법
-  B0 보정 안 함 · B1 전체 감광(Partial B2 가 위험이라 한 프레임에서 화면 전체 ±0.5 s 시간 평균, 선형 빛)
+  B0 보정 안 함 · B0v B0 를 mp4v 로 왕복(B2 압축 손실 대조) · B1 전체 감광(Partial B2 가 위험이라 한 프레임에서 화면 전체 ±0.5 s 시간 평균, 선형 빛)
   B2 팀원 Partial B2 감광(partial_coreops_1112.dim_video_partial_b2, 자막 끔, 코드 수정 없이 호출)
   B3 국소 규칙(Partial B2 픽셀 위험 마스크 안에서 ±0.5 s 시간 평균)
   B4 FlashGuard 식 재구현(arXiv 2507.19692 초록: CIELAB 프레임 간 변화로 깜빡임 검출 → 휘도 낮추기 + 색 전환 시간 평균)
@@ -84,6 +84,18 @@ def b4_flashguard(x: np.ndarray, thr: float = 20.0, dim: float = 0.6, ema: float
     return u8_from_lin(out)
 
 
+def mp4v_roundtrip(x: np.ndarray, tmp: Path) -> np.ndarray:
+    """B0v: 입력을 팀원 B2 와 같은 OpenCV mp4v 로 저장했다가 다시 읽음 — B2 충실도에 섞인 압축 손실의 크기를 재는 대조군."""
+    p = tmp.with_name(tmp.name + "_b0v.mp4")
+    vw = cv2.VideoWriter(str(p), cv2.VideoWriter_fourcc(*"mp4v"), FPS, (x.shape[2], x.shape[1]))
+    for fr in x:
+        vw.write(fr)
+    vw.release()
+    y = decode(p)
+    p.unlink(missing_ok=True)
+    return y
+
+
 def b2_partial(x_path: Path, tmp: Path, team_dir: str) -> np.ndarray:
     b2 = Path(team_dir) / "Partial" / "B2"
     if str(b2) not in sys.path:
@@ -157,7 +169,7 @@ def main():
     ap.add_argument("--data", default="big1")
     ap.add_argument("--split", default="val")
     ap.add_argument("--models", nargs="*", default=[])
-    ap.add_argument("--baselines", nargs="*", default=["B0", "B1", "B2", "B3", "B4"])
+    ap.add_argument("--baselines", nargs="*", default=["B0", "B0v", "B1", "B2", "B3", "B4"])
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--tag", default="")
     a = ap.parse_args()
@@ -197,6 +209,8 @@ def main():
                 try:
                     if m == "B0":
                         y = x
+                    elif m == "B0v":
+                        y = mp4v_roundtrip(x, tmp)
                     elif m == "B1":
                         y = b1_global(x, team_x)
                     elif m == "B2":
