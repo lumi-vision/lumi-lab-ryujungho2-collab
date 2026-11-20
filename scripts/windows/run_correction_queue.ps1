@@ -1,0 +1,29 @@
+# correction model training queue (detached). ASCII only.
+# waits for the hazard7 big run to finish (run.log contains "done"), then trains H, ablations, extra seeds.
+param([string]$Data = "big1")
+$ErrorActionPreference = 'Continue'
+Set-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+$py = '.venv\Scripts\python.exe'
+$logdir = "data\correction\logs"
+New-Item -ItemType Directory -Force $logdir | Out-Null
+function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Out-File -Append -Encoding ascii "$logdir\queue.log" }
+Log "waiting for data\hazard7\$Data\logs\run.log done"
+while (-not (Select-String -Path "data\hazard7\$Data\logs\run.log" -Pattern "done" -Quiet -ErrorAction SilentlyContinue)) { Start-Sleep 120 }
+$runs = @(
+  @("h_s0", "--seed", "0"),
+  @("abl_noattn", "--no-attn"),
+  @("abl_nophys", "--no-phys"),
+  @("abl_nolayer", "--w-layer", "0"),
+  @("abl_nosafe", "--w-safe", "0"),
+  @("h_s1", "--seed", "1"),
+  @("h_s2", "--seed", "2")
+)
+foreach ($r in $runs) {
+  $name = $r[0]
+  $extra = @()
+  if ($r.Count -gt 1) { $extra = $r[1..($r.Count - 1)] }
+  Log "train $name $($extra -join ' ')"
+  $argv = @("-u", "scripts\train_correction.py", "--run", $name, "--data", $Data) + $extra
+  Start-Process -FilePath $py -ArgumentList $argv -NoNewWindow -Wait -RedirectStandardOutput "$logdir\$name.log" -RedirectStandardError "$logdir\$name.err"
+}
+Log "done"
