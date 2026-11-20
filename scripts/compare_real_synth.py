@@ -76,6 +76,11 @@ def best(wins) -> dict:
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--runs", nargs="+", default=["d3", "d4red"], help="합성 run (뒤 run 이 같은 종류를 덮음)")
+    ap.add_argument("--out", default="real_vs_synth")
+    a = ap.parse_args()
     out = {}
     real = ROOT / "data" / "hazcls" / "real"
     tem = np.load(real / "tem.npy", mmap_mode="r")
@@ -92,21 +97,25 @@ def main():
     for name, ks in groups.items():
         out[name] = [best([tem[i] for i in by[k][:20]]) for k in ks if k in by]
         print(name, len(out[name]), flush=True)
-    for run in ("d3", "d4red"):
+    later = {}
+    for run in a.runs:
         d = ROOT / "data" / "hazard7" / run / "val"
         man = [json.loads(l) for l in (d / "manifest.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
         for r in man:
-            if r["intent"] != "hazard" or not r.get("hit_added"):
-                continue
-            if run == "d3" and r["kind"] in ("red_flash", "red_ext"):
+            later[r["kind"]] = run
+    for run in a.runs:
+        d = ROOT / "data" / "hazard7" / run / "val"
+        man = [json.loads(l) for l in (d / "manifest.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+        for r in man:
+            if r["intent"] != "hazard" or not r.get("hit_added") or later[r["kind"]] != run:
                 continue
             fr = decode(d / f"{r['id']}.mp4")
             small = np.stack([cv2.resize(f, (160, 90), interpolation=cv2.INTER_AREA) for f in fr])
             wins = [small[s:s + 48] for s in range(0, len(small) - 47, 48)]
-            out.setdefault(f"합성 {r['kind']}", []).append(best(wins))
+            out.setdefault(f"합성 {r['kind']} ({run})", []).append(best(wins))
     keys = list(next(iter(out.values()))[0].keys())
     L = ["# 실제 위험 영상 대 합성(hazard7) — 생김새 지표 비교", "",
-         "> `scripts/compare_real_synth.py` · 160×90 · 24 fps · 2 s 창 · 영상마다 바뀐 면적이 가장 큰 창 · 값 = 중앙값 [25%–75%]", "",
+         f"> `scripts/compare_real_synth.py --runs {' '.join(a.runs)}` · 160×90 · 24 fps · 2 s 창 · 영상마다 바뀐 면적이 가장 큰 창 · 값 = 중앙값 [25%–75%]", "",
          "| 묶음 | n | " + " | ".join(keys) + " |", "|" + "---|" * (len(keys) + 2)]
     for name, fs in out.items():
         cells = []
@@ -115,9 +124,9 @@ def main():
             cells.append(f"{np.median(v):.2f} [{np.percentile(v, 25):.2f}–{np.percentile(v, 75):.2f}]" if len(v) else "–")
         L.append(f"| {name} | {len(fs)} | " + " | ".join(cells) + " |")
     L += ["", __doc__.split("지표", 1)[1].split("결과:")[0].strip().replace("\n  ", "\n- ")]
-    p = ROOT / "checks" / "hazard7" / "real_vs_synth.md"
+    p = ROOT / "checks" / "hazard7" / f"{a.out}.md"
     p.write_text("\n".join(L) + "\n", encoding="utf-8")
-    json.dump(out, open(ROOT / "data" / "hazard7" / "real_vs_synth.json", "w"), ensure_ascii=False)
+    json.dump(out, open(ROOT / "data" / "hazard7" / f"{a.out}.json", "w"), ensure_ascii=False)
     print(p)
 
 

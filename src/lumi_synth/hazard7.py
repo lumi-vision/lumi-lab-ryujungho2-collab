@@ -370,8 +370,16 @@ def mix_torch(kind: str, mode: str, clean, a, s, p: dict, dev, other=None, plum=
         aw = act * w
         off = x * (1 - aw * p["desat"]) + lum.expand_as(x) * aw * p["desat"]
         return _tu8(off * (1 - rho) + red * rho)
-    # pattern
-    pat = torch.as_tensor(plum / W_CD, device=dev, dtype=torch.float32)[None, ..., None]
+    if kind == "phys":
+        colors = torch.as_tensor(p["colors"], device=dev, dtype=torch.float32)
+        idx = torch.as_tensor(p["idx"], device=dev).long()
+        on = (idx >= 0).float()[:, None, None, None]
+        col = colors[idx.clamp_min(0)][:, None, None, :]
+        ww = w * p["alpha"] * on
+        return _tu8(x * (1 - ww) + col * ww)
+    # pattern (선형 BGR H×W×3 또는 T×H×W×3)
+    pat = torch.as_tensor(np.ascontiguousarray(plum), device=dev, dtype=torch.float32)
+    pat = pat if pat.ndim == 4 else pat[None]
     base = (1 - p["keep"]) * pat + p["keep"] * x
     ww = w * st
     return _tu8(x * (1 - ww) + base * ww)
@@ -401,12 +409,156 @@ def pattern_lum(kind: str, h: int, w: int, cpd: float, lo: float, hi: float, rng
 
 
 def pattern_overlay(clean: np.ndarray, a: np.ndarray, plum: np.ndarray, on: np.ndarray, keep: float) -> np.ndarray:
-    """무늬를 영역에 덮는다(on[t]=1 인 프레임만). keep = 장면 결을 남기는 비율(0~0.25)."""
+    """무늬를 영역에 덮는다(on[t]=1 인 프레임만). keep = 장면 결을 남기는 비율(0~0.25).
+    plum = 선형 BGR 무늬 H×W×3 (또는 흐르는 무늬면 T×H×W×3)."""
     x = lin(clean)
-    pat = (plum / W_CD)[None, ..., None]
+    pat = plum if plum.ndim == 4 else plum[None]
     base = (1 - keep) * pat + keep * x
     w = (a[None] if a.ndim == 2 else a)[..., None] * on[:, None, None, None]
     return u8(x * (1 - w) + base * w)
+
+
+# ---------------- 물리량으로 정의한 색 상태 (휘도 · 적색 정도가 기준, RGB 는 거기서 역산) ----------------
+_YW = np.array([0.0722, 0.7152, 0.2126], np.float32)          # 선형 BGR → 상대 휘도
+
+
+def phys_color(L_cd: float, hue_deg: float, sat: float) -> tuple[list, float]:
+    """휘도 L(cd/m²)·색상·채도 → 선형 BGR. 색역을 넘으면 채도를 줄여 휘도를 지킨다(그래도 안 되면 낼 수 있는 최대 휘도)."""
+    import colorsys
+    y = L_cd / W_CD
+    r, g, b = colorsys.hsv_to_rgb((hue_deg % 360) / 360, 1.0, 1.0)
+    c = np.array([b, g, r], np.float32)
+    for s in np.linspace(sat, 0, 11):
+        v = (1 - s) * np.ones(3, np.float32) + s * c
+        k = y / float(v @ _YW)
+        if (v * k).max() <= 1.0:
+            return [float(x) for x in v * k], L_cd
+    return [min(1.0, y)] * 3, min(1.0, y) * W_CD
+
+
+def red_color(L_cd: float, ratio: float) -> tuple[list, float]:
+    """선형 R/(R+G+B) = ratio, G = B, 휘도 L → 선형 BGR. 낼 수 없으면 휘도를 낮춘다(포화 빨강은 약 47 cd/m² 이하)."""
+    gr = (1 - ratio) / (2 * ratio)
+    y = L_cd / W_CD
+    r = y / (0.2126 + 0.7874 * gr)
+    if r > 1:
+        r = 1.0
+        y = 0.2126 + 0.7874 * gr
+    return [float(r * gr), float(r * gr), float(r)], y * W_CD
+
+
+def sample_phys_states(kind: str, near: str | None, rng) -> dict:
+    """깜빡임 상태들을 물리량에서 뽑는다.
+
+    휘도류: 어두운 상태 L_d(0.3~60, 로그 균등) · 밝은 상태 L_d + ΔL (ΔL 25~190, 경계 weak 는 6~16), 색상 무작위, 채도 0~1.
+            밝은 색을 여러 개(1~5) 두면 켜질 때마다 색이 바뀌는 깜빡임(조명 쇼·색 순환)이 된다.
+    적색류: 빨강(R 비율 0.86~0.99, 경계 weak 는 0.55~0.75, 휘도 3~45) ↔ 짝(검정 · 밝은 무채색 · 다른 색상) 중 하나.
+    """
+    if kind in ("red_flash", "red_ext"):
+        ratio = float(rng.uniform(0.86, 0.99)) if near != "weak" else float(rng.uniform(0.55, 0.75))
+        red, Lr = red_color(float(np.exp(rng.uniform(np.log(3), np.log(45)))), ratio)
+        partner = str(rng.choice(["black", "white", "hue"], p=[0.4, 0.25, 0.35]))
+        if partner == "black":
+            other, Lo = phys_color(float(rng.uniform(0.0, 3.0)), 0, 0)
+        elif partner == "white":
+            other, Lo = phys_color(float(rng.uniform(60, 200)), float(rng.uniform(0, 360)), float(rng.uniform(0, 0.3)))
+        else:
+            other, Lo = phys_color(float(rng.uniform(5, 80)), float(rng.uniform(150, 290)), float(rng.uniform(0.6, 1.0)))
+        return {"dark": [other], "bright": [red], "L_dark": [Lo], "L_bright": [Lr], "red_ratio": ratio, "partner": partner}
+    Ld = float(np.exp(rng.uniform(np.log(0.3), np.log(60))))
+    k = int(rng.choice([1, 1, 1, 2, 3, 5]))
+    dark, Ldl = phys_color(Ld, float(rng.uniform(0, 360)), float(rng.uniform(0, 0.8)))
+    bright, Lb = [], []
+    for _ in range(k):
+        dL = float(rng.uniform(25, 190)) if near != "weak" else float(rng.uniform(6, 16))
+        c, L = phys_color(min(200.0, Ldl + dL), float(rng.uniform(0, 360)), float(rng.uniform(0, 1)))
+        bright.append(c); Lb.append(L)
+    return {"dark": [dark], "bright": bright, "L_dark": [Ldl], "L_bright": Lb}
+
+
+def phys_schedule(n: int, t0: int, t1: int, on: list, off: list, rhythm: str, k_bright: int, rng) -> np.ndarray:
+    """프레임별 상태 번호: −1 = 장면 그대로, 0 = 어두운 상태, 1..k = 밝은 상태들(켜질 때마다 다음 색).
+
+    rhythm: regular(on=off 같은 집합) · asym(켜짐 짧고 꺼짐 길게 — 스트로보) · burst(몇 번 몰아 깜빡이고 0.15~0.5 s 쉼).
+    실제 위험 영상의 리듬 변동계수는 약 0.5, 규칙 생성은 0.15 였다(checks/hazard7/real_vs_synth.md).
+    """
+    idx = np.full(n, -1, np.int16)
+    t, bright, cnt, nb = t0, True, 0, 0
+    run = int(rng.integers(5, 15))
+    while t < t1:
+        if bright:
+            h = int(rng.choice(on)); idx[t:min(t + h, t1)] = 1 + (nb % k_bright); nb += 1
+        else:
+            h = int(rng.choice(off)); idx[t:min(t + h, t1)] = 0
+        t += h; bright = not bright; cnt += 1
+        if rhythm == "burst" and cnt >= run:
+            p = int(rng.integers(4, 13))                          # 0.15~0.5 s 쉼(어두운 상태 또는 장면)
+            idx[t:min(t + p, t1)] = 0 if rng.random() < 0.5 else -1
+            t += p; cnt = 0; run = int(rng.integers(5, 15)); bright = True
+    return idx
+
+
+def mix_phys(clean: np.ndarray, a, idx: np.ndarray, colors: np.ndarray, alpha: float) -> np.ndarray:
+    """상태 색으로 영역을 덮는다(alpha = 덮는 정도, 나머지는 장면 결). idx −1 은 장면 그대로."""
+    x = lin(clean)
+    aa = a if np.ndim(a) == 3 else np.broadcast_to(a, x.shape[:3])
+    on = (idx >= 0).astype(np.float32)[:, None, None, None]
+    col = colors[np.maximum(idx, 0)][:, None, None, :]
+    w = aa[..., None] * alpha * on
+    return u8(x * (1 - w) + col * w)
+
+
+def prepare_bg(r: dict, clean: np.ndarray) -> np.ndarray:
+    """레시피의 bg_gain(<1 이면 어두운 장면 흉내)을 선형 빛에 곱한다. 바탕 mp4 도 이 결과로 저장해야 뺄셈이 맞다."""
+    g = r.get("bg_gain", 1.0)
+    if g >= 0.999:
+        return clean
+    lut = u8(_LUT * g)
+    return lut[clean]
+
+
+def graphic_bg(n: int, h: int, w: int, rng) -> np.ndarray:
+    """합성 그래픽 바탕: 그라데이션 + 도형 + 글자를 큰 캔버스에 그려 천천히 훑는다(움직이는 밈·자막·게임 화면 흉내)."""
+    from PIL import Image, ImageDraw, ImageFont
+    pad = 160
+    H2, W2 = h + 2 * pad, w + 2 * pad
+    c1, c2 = rng.integers(0, 256, 3), rng.integers(0, 256, 3)
+    if rng.random() < 0.4:                                    # 어두운 바탕 + 네온
+        c1, c2 = rng.integers(0, 40, 3), rng.integers(0, 60, 3)
+    tt = np.linspace(0, 1, H2)[:, None, None] if rng.random() < 0.5 else np.linspace(0, 1, W2)[None, :, None]
+    base = (c1 * (1 - tt) + c2 * tt) * np.ones((H2, W2, 1))
+    img = Image.fromarray(base.astype(np.uint8))
+    d = ImageDraw.Draw(img)
+    for _ in range(int(rng.integers(4, 16))):
+        x0, y0 = int(rng.integers(0, W2)), int(rng.integers(0, H2))
+        x1, y1 = x0 + int(rng.integers(30, 300)), y0 + int(rng.integers(30, 220))
+        col = tuple(int(v) for v in rng.integers(0, 256, 3))
+        (d.rectangle if rng.random() < 0.5 else d.ellipse)([x0, y0, x1, y1], fill=col)
+    fonts = ["C:/Windows/Fonts/malgun.ttf", "C:/Windows/Fonts/arialbd.ttf", "C:/Windows/Fonts/impact.ttf"]
+    words = ["LOL", "WOW", "OMG", "LIVE", "NEW", "GAME OVER", "SALE", "속보", "대박", "ㅋㅋㅋ", "HELLO", "2026"]
+    for _ in range(int(rng.integers(1, 4))):
+        try:
+            f = ImageFont.truetype(str(rng.choice(fonts)), int(rng.integers(30, 110)))
+        except OSError:
+            f = ImageFont.load_default()
+        d.text((int(rng.integers(0, W2 - 200)), int(rng.integers(0, H2 - 100))), str(rng.choice(words)), font=f,
+               fill=tuple(int(v) for v in rng.integers(0, 256, 3)), stroke_width=int(rng.integers(0, 4)), stroke_fill=(0, 0, 0))
+    can = np.array(img)[..., ::-1]
+    vx, vy = rng.uniform(-pad, pad) / n, rng.uniform(-pad, pad) / n
+    out = np.empty((n, h, w, 3), np.uint8)
+    for t in range(n):
+        x0 = int(np.clip(pad + vx * t, 0, 2 * pad)); y0 = int(np.clip(pad + vy * t, 0, 2 * pad))
+        out[t] = can[y0:y0 + h, x0:x0 + w]
+    return out
+
+
+def color_pattern(plum: np.ndarray, r: dict) -> np.ndarray:
+    """무늬 휘도(lo/hi 두 값) → 두 색(같은 휘도, 색상만 다름)의 선형 BGR H×W×3. 판정에 쓰이는 휘도 대비는 그대로."""
+    mid = (r["lo"] + r["hi"]) / 2
+    clo, _ = phys_color(r["lo"], r["pat_hue_lo"], r["pat_sat"])
+    chi, _ = phys_color(r["hi"], r["pat_hue_hi"], r["pat_sat"])
+    m = (plum >= mid)[..., None]
+    return np.where(m, np.array(chi, np.float32), np.array(clo, np.float32))
 
 
 # ---------------- 레시피 ----------------
@@ -503,7 +655,34 @@ def sample_recipe(kind: str, intent: str, seed: int, n: int, fps: float) -> dict
             r["a_rgb"], r["b_rgb"] = list(pr["a_rgb"]), list(pr["b_rgb"])
         except ValueError:
             r["mode"] = "tint"
+    # ---- 2026-11-20: 실제 위험 영상과의 차이를 줄이는 선택지 (checks/hazard7/real_vs_synth.md)
+    if kind != "pattern":
+        p_phys = {"lum_flash": 0.5, "lum_ext": 0.5, "red_flash": 0.5, "red_ext": 0.5, "scene": 0.35, "intersection": 0.35}[kind]
+        if rng.random() < p_phys:
+            r["mode"] = "phys"
+            st = sample_phys_states(kind, r.get("near"), rng)
+            r["states"] = st
+            r["alpha"] = float(rng.uniform(0.92, 1.0)) if kind.startswith("red") else float(rng.uniform(0.75, 1.0))
+            r["sigma"] = 0.0
+        if kind in ("lum_flash", "red_flash", "intersection") and r.get("near") != "slow":
+            r["rhythm"] = str(rng.choice(["regular", "asym", "burst"], p=[0.3, 0.35, 0.35]))
+        else:
+            r["rhythm"] = str(rng.choice(["regular", "asym"]))
+        if r.get("mode") == "add":
+            r["delta_cd"] = float(rng.uniform(45, 180)) if r.get("near") != "weak" else r["delta_cd"]
+    else:
+        r["pat_color"] = bool(rng.random() < 0.6)                 # 두 색 무늬(같은 휘도 대비, 색상만 다름)
+        r["pat_hue_lo"], r["pat_hue_hi"], r["pat_sat"] = float(rng.uniform(0, 360)), float(rng.uniform(0, 360)), float(rng.uniform(0.3, 1.0))
+        r["pat_drift"] = [float(v) for v in rng.uniform(-3, 3, 2)] if rng.random() < 0.4 else [0.0, 0.0]   # 흐르는 무늬 (px/프레임)
+    r["bg_gain"] = float(rng.uniform(0.15, 0.6)) if rng.random() < 0.35 else 1.0   # 어두운 장면 (실제 Kaya 검은 배경 비율 0.54)
     return r
+
+
+def _on_off(halves: list, rhythm: str) -> tuple[list, list]:
+    """반주기 집합 → (켜짐, 꺼짐) 길이 집합. asym 은 켜짐을 짧게·꺼짐을 길게(합은 거의 그대로 → 초당 전이 수 유지)."""
+    if rhythm == "asym":
+        return sorted({max(1, h - 1) for h in halves} | {halves[0]}), sorted({h + 1 for h in halves})
+    return list(halves), list(halves)
 
 
 def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=None) -> tuple[np.ndarray, np.ndarray]:
@@ -515,10 +694,21 @@ def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=N
     n, (h, w) = r["n"], clean.shape[1:3]
     clean = clean[:n]
     kind = r["kind"]
+    idx = colors = None
     if kind == "pattern":
         s = np.zeros(n, np.float32); s[r["t0"]:r["t1"]] = 1
+    elif r.get("mode") == "phys":
+        st = r["states"]
+        colors = np.array(st["dark"] + st["bright"], np.float32)
+        on, off = _on_off(r["halves"], r.get("rhythm", "regular"))
+        idx = phys_schedule(n, r["t0"], r["t1"], on, off, r.get("rhythm", "regular"), len(st["bright"]), rng)
+        s = (idx >= 1).astype(np.float32)                      # 마스크(점광원 커짐 등)용 켜짐 신호
     else:
-        s = soften(toggle_state(n, r["t0"], r["t1"], r["halves"], rng), r["sigma"])
+        on, off = _on_off(r["halves"], r.get("rhythm", "regular"))
+        if on == off:
+            s = soften(toggle_state(n, r["t0"], r["t1"], r["halves"], rng), r["sigma"])
+        else:
+            s = soften((phys_schedule(n, r["t0"], r["t1"], on, off, r["rhythm"], 1, rng) == 1).astype(np.float32), r["sigma"])
     plum = None
     if r["area"] >= 1:
         a = np.ones((h, w), np.float32)
@@ -531,6 +721,7 @@ def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=N
         else:
             m = region(h, w, r["area"], rng)
         a = feather(m, min(r["feather"], 2.0))
+        plum = color_pattern(plum, r) if r.get("pat_color") else np.repeat((plum / W_CD)[..., None], 3, -1)  # 선형 BGR H×W×3
     else:
         a = dynamic_region(r, clean, s, rng)
     active = np.zeros(n, np.float32); active[r["t0"]:r["t1"]] = 1
@@ -541,6 +732,17 @@ def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=N
         c = slice(c0, min(n, c0 + 24))
         ac = a[c] if a.ndim == 3 else a
         p = dict(r); p["active"] = active[c]
+        pc = plum
+        if plum is not None and any(r.get("pat_drift", [0, 0])):   # 흐르는 무늬: 프레임마다 위상 이동
+            dx, dy = r["pat_drift"]
+            pc = np.stack([np.roll(plum, (int(round(dy * t)), int(round(dx * t))), axis=(0, 1)) for t in range(c.start, c.stop)])
+        if r.get("mode") == "phys":
+            p["colors"], p["idx"] = colors, idx[c]
+            if device is not None:
+                out[c] = mix_torch("phys", "", clean[c], ac, s[c], p, device)
+            else:
+                out[c] = mix_phys(clean[c], ac, idx[c], colors, r["alpha"])
+            continue
         if device is not None:                                  # GPU 섞기
             if kind in ("scene", "intersection") and r["mode"] == "cut":
                 out[c] = mix_torch("scene_cut", "cut", clean[c], None, s[c], p, device, other=oth[c])
@@ -549,7 +751,7 @@ def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=N
             elif kind in ("red_flash", "red_ext"):
                 out[c] = mix_torch("red", r["mode"], clean[c], ac, s[c], p, device)
             else:
-                out[c] = mix_torch("pattern", "", clean[c], ac, s[c], p, device, plum=plum)
+                out[c] = mix_torch("pattern", "", clean[c], ac, s[c], p, device, plum=pc)
             continue
         if kind in ("lum_flash", "lum_ext") or (kind in ("scene", "intersection") and r["mode"] in ("add", "gain", "flat")):
             out[c] = lum_modulate(clean[c], ac, s[c], r["mode"], r)
@@ -558,6 +760,6 @@ def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=N
         elif kind in ("red_flash", "red_ext"):
             out[c] = red_modulate(clean[c], ac, s[c], r["mode"], p)
         else:
-            out[c] = pattern_overlay(clean[c], ac, plum, s[c], r["keep"])
+            out[c] = pattern_overlay(clean[c], ac, pc, s[c], r["keep"])
     aa = a if a.ndim == 3 else np.broadcast_to(a, (n, h, w))
     return out, aa

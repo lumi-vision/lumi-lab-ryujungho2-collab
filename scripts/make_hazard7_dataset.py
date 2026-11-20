@@ -38,8 +38,93 @@ SRC = {"train": ("data/sources/big_buck_bunny_1080p/big_buck_bunny_1080p_h264.mo
        "test": ("data/raw/sintel/Sintel.2010.1080p.mkv", 60, 840)}
 
 
-def bg_clip(split: str, rng) -> tuple[np.ndarray, float]:
-    """분할 구간에서 무작위 8초 → N×432×768×3 BGR uint8 (24 fps 가 아니면 시간 기준으로 다시 뽑음)."""
+# 바탕 소스 비율 (분할별). movie = BBB(train/val 구간) 또는 Sintel(test), south = South 2021 안전 영상(사용자 결정 2026-11-20),
+# graphic = 합성 그래픽(단색·그라데이션·도형·글자, 천천히 움직임)
+BG_MIX = {"train": {"movie": 0.35, "south": 0.45, "graphic": 0.20},
+          "val": {"movie": 0.35, "south": 0.45, "graphic": 0.20},
+          "test": {"movie": 1.0}}
+_SOUTH = None
+
+
+def south_bg_split() -> dict:
+    """South 안전 영상을 파일 SHA-256 으로 80:20 (train:val) 나눈 목록. data/hazard7/south_bg_split.json 에 고정 저장."""
+    global _SOUTH
+    if _SOUTH is not None:
+        return _SOUTH
+    import csv
+    import hashlib
+    p = ROOT / "data" / "hazard7" / "south_bg_split.json"
+    if p.exists():
+        _SOUTH = json.loads(p.read_text(encoding="utf-8"))
+        return _SOUTH
+    base = ROOT / "data" / "real" / "south2021"
+    files = {f.stem: f for f in (base / "social-media-study-gifs").rglob("*") if f.suffix.lower() in (".gif", ".mp4")}
+    with open(base / "social-media-study.csv", newline="", encoding="utf-8-sig") as f:
+        safe = [r["label"] for r in csv.DictReader(f) if r["dangerous"] != "dangerous" and r["label"] in files]
+    out = {"train": [], "val": [], "note": "South 안전 영상 → hazard7 바탕. 해시 앞 8자리 mod 5 == 0 → val. 같은 해시는 같은 분할"}
+    for lab in sorted(safe):
+        h = hashlib.sha256(files[lab].read_bytes()).hexdigest()
+        out["val" if int(h[:8], 16) % 5 == 0 else "train"].append(str(files[lab].relative_to(ROOT)))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(out, ensure_ascii=False, indent=0), encoding="utf-8")
+    _SOUTH = out
+    return out
+
+
+def fit_frame(img: np.ndarray, how: str) -> np.ndarray:
+    """임의 크기 → 768×432. crop = 16:9 로 가운데 자르기, pad = 흐린 확대 바탕 위에 비율 유지(소셜 영상에서 흔한 꼴)."""
+    import cv2
+    h, w = img.shape[:2]
+    if how == "crop":
+        if w / h > W / H:
+            nw = int(h * W / H); x0 = (w - nw) // 2; img = img[:, x0:x0 + nw]
+        else:
+            nh = int(w * H / W); y0 = (h - nh) // 2; img = img[y0:y0 + nh]
+        return cv2.resize(img, (W, H), interpolation=cv2.INTER_AREA if img.shape[1] > W else cv2.INTER_LINEAR)
+    bg = cv2.GaussianBlur(cv2.resize(img, (W, H)), (0, 0), 12)
+    s = min(W / w, H / h)
+    nw, nh = max(2, int(w * s)), max(2, int(h * s))
+    fg = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR)
+    y0, x0 = (H - nh) // 2, (W - nw) // 2
+    bg[y0:y0 + nh, x0:x0 + nw] = fg
+    return bg
+
+
+def south_clip(split: str, rng) -> tuple[np.ndarray, dict]:
+    """South 안전 영상 하나 → 24 fps 로 시간 기준 재표본, 8 초가 안 되면 반복(GIF 는 반복 재생된다)."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from eval_real_hazards import decode as dec_any
+    lst = south_bg_split()[split]
+    for _ in range(10):
+        f = lst[int(rng.integers(len(lst)))]
+        try:
+            frames, fps = dec_any(ROOT / f)
+            break
+        except Exception:  # noqa: BLE001 — 한 장짜리 GIF 등은 건너뜀
+            continue
+    n = len(frames)
+    t = np.arange(N) / FPS + float(rng.uniform(0, max(0.0, n / fps - N / FPS)) if n / fps > N / FPS else 0)
+    idx = np.floor(t * fps).astype(int) % n
+    how = str(rng.choice(["crop", "pad"]))
+    cache = {}
+    out = np.stack([cache.setdefault(i, fit_frame(frames[i], how)) for i in idx])
+    return out, {"source": "south", "file": f, "fit": how, "src_fps": round(fps, 2), "src_frames": n}
+
+
+def bg_clip(split: str, rng) -> tuple[np.ndarray, dict]:
+    """바탕 8 초 → (N×432×768×3 BGR uint8, 정보). 소스는 BG_MIX 비율로 고른다."""
+    mix = BG_MIX[split]
+    src = str(rng.choice(list(mix), p=list(mix.values())))
+    if src == "south":
+        return south_clip(split, rng)
+    if src == "graphic":
+        return hazard7.graphic_bg(N, H, W, rng), {"source": "graphic"}
+    clip, start = movie_clip(split, rng)
+    return clip, {"source": "movie", "file": SRC[split][0].split("/")[-1], "start": round(start, 3)}
+
+
+def movie_clip(split: str, rng) -> tuple[np.ndarray, float]:
+    """영화 분할 구간에서 무작위 8초 → N×432×768×3 BGR uint8 (24 fps 가 아니면 시간 기준으로 다시 뽑음)."""
     import av
     import cv2
     f, s0, s1 = SRC[split]
@@ -125,6 +210,7 @@ def gen_one(job):
         clean, start = bg_clip(split, rng)
         other, start2 = bg_clip(split, rng) if kind in ("scene", "intersection") else (None, None)
         r = hazard7.sample_recipe(kind, intent, seed, N, FPS)
+        clean = hazard7.prepare_bg(r, clean)              # 어두운 장면 흉내(일부 레시피) — 바탕 mp4 도 이것으로 저장
         dev = None
         if device != "cpu":
             import torch
@@ -134,7 +220,7 @@ def gen_one(job):
         encode(clean, Path(out_dir) / f"{sid}.clean.mp4")
         r = {k: (v if not isinstance(v, np.generic) else v.item()) for k, v in r.items()}
         return {"id": sid, "split": split, "kind": kind, "intent": intent, "target_label": hazard7.KIND_LABEL[kind], "recipe": r,
-                "bg": {"start": round(start, 3), "other_start": None if start2 is None else round(start2, 3)},
+                "bg": start, "bg_other": start2,
                 "region_mean": round(float(a.mean()), 4), "gen_device": device, "gen_sec": round(time.time() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         import traceback
