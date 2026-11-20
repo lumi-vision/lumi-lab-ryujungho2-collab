@@ -266,7 +266,8 @@ def lum_modulate(clean: np.ndarray, a: np.ndarray, s: np.ndarray, mode: str, p: 
     elif mode == "flat":
         lo, hi = p["lo_cd"] / W_CD, p["hi_cd"] / W_CD
         v = lo + (hi - lo) * s[:, None, None, None]
-        y = x * (1 - a[..., None]) + v * a[..., None]
+        fa = a[..., None] * p.get("flat_alpha", 1.0)
+        y = x * (1 - fa) + v * fa
     else:
         raise ValueError(mode)
     return u8(y)
@@ -354,7 +355,8 @@ def mix_torch(kind: str, mode: str, clean, a, s, p: dict, dev, other=None, plum=
             y = x * (1 - w) + x * g * w + w * st * p.get("lift", 0.0)
         else:
             lo, hi = p["lo_cd"] / W_CD, p["hi_cd"] / W_CD
-            y = x * (1 - w) + (lo + (hi - lo) * st) * w
+            fw = w * p.get("flat_alpha", 1.0)
+            y = x * (1 - fw) + (lo + (hi - lo) * st) * fw
         return _tu8(y)
     if kind == "red":
         if mode == "pair":
@@ -447,7 +449,7 @@ def red_color(L_cd: float, ratio: float) -> tuple[list, float]:
     return [float(r * gr), float(r * gr), float(r)], y * W_CD
 
 
-def sample_phys_states(kind: str, near: str | None, rng) -> dict:
+def sample_phys_states(kind: str, near: str | None, rng, alpha: float = 1.0) -> dict:
     """깜빡임 상태들을 물리량에서 뽑는다.
 
     휘도류: 어두운 상태 L_d(0.3~60, 로그 균등) · 밝은 상태 L_d + ΔL (ΔL 25~190, 경계 weak 는 6~16), 색상 무작위, 채도 0~1.
@@ -471,6 +473,7 @@ def sample_phys_states(kind: str, near: str | None, rng) -> dict:
     bright, Lb = [], []
     for _ in range(k):
         dL = float(rng.uniform(25, 190)) if near != "weak" else float(rng.uniform(6, 16))
+        dL = dL / max(alpha, 0.05)                              # 투명하게 덮으면 실제 ΔL = α·ΔL → 목표 ΔL 이 나오게 키움(200 cd 에서 잘림)
         c, L = phys_color(min(200.0, Ldl + dL), float(rng.uniform(0, 360)), float(rng.uniform(0, 1)))
         bright.append(c); Lb.append(L)
     return {"dark": [dark], "bright": bright, "L_dark": [Ldl], "L_bright": Lb}
@@ -660,9 +663,14 @@ def sample_recipe(kind: str, intent: str, seed: int, n: int, fps: float) -> dict
         p_phys = {"lum_flash": 0.5, "lum_ext": 0.5, "red_flash": 0.5, "red_ext": 0.5, "scene": 0.35, "intersection": 0.35}[kind]
         if rng.random() < p_phys:
             r["mode"] = "phys"
-            st = sample_phys_states(kind, r.get("near"), rng)
+            # 투명도: 휘도류는 80% 를 0.35~0.9 로(원본이 비쳐 남음 → 보정 모델이 원본으로 되돌릴 수 있음), 20% 는 거의 불투명.
+            # 적색류는 0.97 이상(장면이 비치면 포화 빨강 조건을 못 넘는다 — d5)
+            if kind.startswith("red"):
+                r["alpha"] = float(rng.uniform(0.97, 1.0))
+            else:
+                r["alpha"] = float(rng.uniform(0.35, 0.9)) if rng.random() < 0.8 else float(rng.uniform(0.9, 1.0))
+            st = sample_phys_states(kind, r.get("near"), rng, alpha=r["alpha"])
             r["states"] = st
-            r["alpha"] = float(rng.uniform(0.97, 1.0)) if kind.startswith("red") else float(rng.uniform(0.75, 1.0))
             r["sigma"] = 0.0
         if kind in ("lum_flash", "red_flash", "intersection") and r.get("near") != "slow":
             r["rhythm"] = str(rng.choice(["regular", "asym", "burst"], p=[0.3, 0.35, 0.35]))
@@ -673,7 +681,9 @@ def sample_recipe(kind: str, intent: str, seed: int, n: int, fps: float) -> dict
     else:
         r["pat_color"] = bool(rng.random() < 0.6)                 # 두 색 무늬(같은 휘도 대비, 색상만 다름)
         r["pat_hue_lo"], r["pat_hue_hi"], r["pat_sat"] = float(rng.uniform(0, 360)), float(rng.uniform(0, 360)), float(rng.uniform(0.3, 1.0))
+        r["keep"] = float(rng.uniform(0.0, 0.45))                # 무늬 투명도(장면 결이 비치는 몫)
         r["pat_drift"] = [float(v) for v in rng.uniform(-3, 3, 2)] if rng.random() < 0.4 else [0.0, 0.0]   # 흐르는 무늬 (px/프레임)
+    r["flat_alpha"] = float(rng.uniform(0.4, 0.9)) if rng.random() < 0.7 else 1.0   # 단색 덮기 투명도
     r["bg_gain"] = float(rng.uniform(0.15, 0.6)) if rng.random() < 0.35 else 1.0   # 어두운 장면 (실제 Kaya 검은 배경 비율 0.54)
     return r
 
@@ -685,7 +695,8 @@ def _on_off(halves: list, rhythm: str) -> tuple[list, list]:
     return list(halves), list(halves)
 
 
-def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=None) -> tuple[np.ndarray, np.ndarray]:
+def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=None, want_layers: bool = False,
+           layer_scale: int = 4):
     """레시피 → (영상 T×H×W×3 uint8 BGR, 합성 영역 가중 T×H×W float — 바뀐 곳). clean 은 n 프레임 이상.
 
     device(torch, 예: 'cuda') 를 주면 섞기를 GPU 에서 한다(마스크·무늬 만들기는 CPU). numpy 경로와 sRGB 반올림 차이 ±1 이내.
@@ -726,6 +737,40 @@ def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=N
         a = dynamic_region(r, clean, s, rng)
     active = np.zeros(n, np.float32); active[r["t0"]:r["t1"]] = 1
     oth = (other[:n] if other is not None else clean[::-1]) if kind in ("scene", "intersection") else None
+    st = {"s": s, "a": a, "idx": idx, "colors": colors, "plum": plum, "oth": oth, "active": active}
+    out = _mix_all(r, st, clean, device)
+    aa = a if a.ndim == 3 else np.broadcast_to(a, (n, h, w))
+    if want_layers:
+        return out, aa, layers(r, st, n, h, w, device, scale=layer_scale)
+    return out, aa
+
+
+PROBE_U8 = 188                                   # 선형 ≈ 0.503 — 밝은 쪽 포화(1 에서 잘림)를 피하려고 중간값으로 잰다
+
+
+def layers(r: dict, st: dict, n: int, h: int, w: int, device=None, scale: int = 4) -> dict:
+    """합성을 선형 빛의 아핀 식 X = A ⊙ Y + B 로 나타낸 '층 정답'(1/scale 해상도).
+
+    같은 마스크·리듬·색으로 원본 자리에 상수 0 과 상수 PROBE 를 넣어 섞는다: B = f(0), A = (f(PROBE) − f(0)) / PROBE.
+    빛 더하기(A=1), 밝기 곱(A=g), 덮기(A=1−αw), 무늬(A=1−w(1−keep)), 장면 컷 밝은 쪽(A=0, B=다른 장면)이 모두 이 꼴이다.
+    물들이기(tint)는 채널 사이가 섞여 근사, 1 을 넘는 빛은 잘려 근사. A ≈ 0 인 곳 = 원본 정보 없음(시간으로만 복원 가능).
+    보정 모델의 층 손실·물리 역산 Y = (X − B)/A 에 쓴다 (docs/CORRECTION_PROTOCOL.md).
+    """
+    import cv2
+    z = np.zeros((n, h, w, 3), np.uint8)
+    f0 = _LUT[_mix_all(r, st, z, device)]
+    fp = _LUT[_mix_all(r, st, z + PROBE_U8, device)]
+    p = float(_LUT[PROBE_U8])
+    A = np.clip((fp - f0) / p, 0.0, 1.5)
+    hs, ws = h // scale, w // scale
+    down = lambda x: np.stack([cv2.resize(f, (ws, hs), interpolation=cv2.INTER_AREA) for f in x])
+    return {"A": down(A).astype(np.float16), "B": down(f0).astype(np.float16), "scale": scale}
+
+
+def _mix_all(r: dict, st: dict, clean: np.ndarray, device=None) -> np.ndarray:
+    """render 가 준비한 상태(st)로 clean 에 섞는다. 같은 st 에 다른 clean(상수 등)을 넣으면 층 정답을 잴 수 있다."""
+    kind, n = r["kind"], r["n"]
+    s, a, idx, colors, plum, oth, active = (st[k] for k in ("s", "a", "idx", "colors", "plum", "oth", "active"))
     out = np.empty_like(clean)
     # 프레임 24장씩 섞는다 — 8 s 전체를 float 로 한꺼번에 만들면 프로세스당 수~십수 GB 를 써서 메모리가 모자랐다(2026-11-20)
     for c0 in range(0, n, 24):
@@ -761,5 +806,4 @@ def render(r: dict, clean: np.ndarray, other: np.ndarray | None = None, device=N
             out[c] = red_modulate(clean[c], ac, s[c], r["mode"], p)
         else:
             out[c] = pattern_overlay(clean[c], ac, pc, s[c], r["keep"])
-    aa = a if a.ndim == 3 else np.broadcast_to(a, (n, h, w))
-    return out, aa
+    return out

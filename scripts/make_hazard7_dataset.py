@@ -215,13 +215,23 @@ def gen_one(job):
         if device != "cpu":
             import torch
             dev = torch.device(device)
-        out, a = hazard7.render(r, clean, other, device=dev)
+        out, a, L = hazard7.render(r, clean, other, device=dev, want_layers=True)
+        # 층 정답 X = A·Y + B (선형 빛, 1/4 해상도) — 보정 모델의 층 손실·물리 역산용. 앞방향 오차도 기록(물들이기·잘림은 근사)
+        import cv2
+        dn = lambda x: np.stack([cv2.resize(f, (W // 4, H // 4), interpolation=cv2.INTER_AREA) for f in x])
+        Xl, Yl = dn(hazard7._LUT[out]), dn(hazard7._LUT[clean])
+        A32, B32 = L["A"].astype(np.float32), L["B"].astype(np.float32)
+        fwd = np.abs(A32 * Yl + B32 - Xl)
+        lost = float((A32.mean(-1) < 0.05).mean())
+        np.savez_compressed(Path(out_dir) / f"{sid}.layers.npz", A=L["A"], B=L["B"], scale=4)
         encode(out, Path(out_dir) / f"{sid}.mp4")
         encode(clean, Path(out_dir) / f"{sid}.clean.mp4")
         r = {k: (v if not isinstance(v, np.generic) else v.item()) for k, v in r.items()}
         return {"id": sid, "split": split, "kind": kind, "intent": intent, "target_label": hazard7.KIND_LABEL[kind], "recipe": r,
                 "bg": start, "bg_other": start2,
-                "region_mean": round(float(a.mean()), 4), "gen_device": device, "gen_sec": round(time.time() - t0, 1)}
+                "region_mean": round(float(a.mean()), 4), "gen_device": device,
+                "layer": {"fwd_p99": round(float(np.percentile(fwd, 99)), 4), "fwd_mean": round(float(fwd.mean()), 5),
+                          "lost_frac": round(lost, 4), "A_mean": round(float(A32.mean()), 4)}, "gen_sec": round(time.time() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         import traceback
         return {"id": sid, "kind": kind, "intent": intent, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-1200:]}
@@ -322,11 +332,16 @@ def main():
     ap.add_argument("--phase", default="all", choices=("gen", "judge", "all"),
                     help="gen: 합성(GPU)·인코딩만 · judge: 판정만(팀원 판별기 GPU 한 프로세스 + 우리 판정기 CPU 병렬) · all: 차례로")
     ap.add_argument("--gen-device", default="cuda", help="합성(섞기) 장치. cpu 면 numpy")
+    ap.add_argument("--shard", default="", help="판정을 여러 프로세스로 나눌 때 i/k (예: 0/3). 결과는 manifest.s<i>.jsonl")
     a = ap.parse_args()
     out = ROOT / "data" / "hazard7" / a.name / a.split
     out.mkdir(parents=True, exist_ok=True)
     gen_man, man = out / "gen.jsonl", out / "manifest.jsonl"
     read = lambda p: [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()] if p.exists() else []
+    read_all = lambda: [x for q in sorted(out.glob("manifest*.jsonl")) for x in read(q)]   # 조각 판정 결과까지 합침
+    if a.shard:
+        si, sk = (int(v) for v in a.shard.split("/"))
+        man = out / f"manifest.s{si}.jsonl"
     t0 = time.time()
 
     if a.phase in ("gen", "all"):                     # ---- 1단계: 생성 (GPU 는 섞기에)
@@ -349,8 +364,10 @@ def main():
 
     if a.phase in ("judge", "all"):                   # ---- 2단계: 판정 (GPU 는 팀원 판별기에)
         gens = {r["id"]: r for r in read(gen_man) if "error" not in r}
-        done = {r["id"] for r in read(man) if "error" not in r}
+        done = {r["id"] for r in read_all() if "error" not in r}
         todo = [g for sid, g in sorted(gens.items()) if sid not in done]
+        if a.shard:
+            todo = todo[si::sk]
         print(f"[판정] {len(todo)}개 (이미 {len(done)}개) · 팀원 {a.variant} B2 GPU 1 프로세스 · 우리 판정기 CPU {a.workers}", flush=True)
         t1 = time.time()
         with cf.ProcessPoolExecutor(a.workers) as ex, man.open("a", encoding="utf-8") as f:
@@ -364,7 +381,7 @@ def main():
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
                 if "error" in row or i % 10 == 0:
                     print(f"  판정 {i}/{len(todo)} ({time.time() - t1:.0f}초) {row['id']} {row.get('error', '적중' if row.get('hit_added') else '')}", flush=True)
-    rows = read(man)
+    rows = read_all()
     if not rows:
         return
     rep = ROOT / "checks" / "hazard7" / f"{a.name}_{a.split}.md"
