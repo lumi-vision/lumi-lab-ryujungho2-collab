@@ -316,4 +316,12 @@ def plot(hist, path, best_ep):
 
 
 if __name__ == "__main__":
-    main()
+    # 2026-11-21: CUDA 메모리 부족이 AcceleratorError 로 올라오면(OutOfMemoryError 아님) 단계 건너뛰기에 안 잡히고,
+    # 예외 뒤 CUDA 문맥이 깨져 프로세스가 끝나지 못한 채 멈췄다(감시 스크립트가 15분 뒤에야 끝냄).
+    # → 처리 못 한 예외는 기록하고 즉시 강제 종료해 큐가 바로 이어 하게 한다(학습 내용·결과에는 영향 없음).
+    import os, traceback
+    try:
+        main()
+    except BaseException:
+        traceback.print_exc(); sys.stderr.flush(); sys.stdout.flush()
+        os._exit(3)
