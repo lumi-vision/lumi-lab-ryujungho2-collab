@@ -129,6 +129,21 @@ class CorrNet(nn.Module):
         self.head = nn.Conv2d(48, 3 + 3 + 1 + 8, 3, padding=1)                                # A, B, 위험, 특징 8
         self.refine = Refine3D(3 + 3 + 3 + 3 + 1 + 8)
 
+    REFINE_HALO = 18                                     # 정제망 시간 수용 반경 = 1+2+4+8+1 = 16(+1 여유) 프레임
+
+    def refine_chunked(self, r_in: torch.Tensor, chunk: int = 48) -> torch.Tensor:
+        """추론용: 정제망을 시간 조각(앞뒤 HALO 겹침)으로 돌리고 가운데만 쓴다 → 통째로 돌린 결과와 같고 메모리 최고점은 작다.
+        (2026-11-21: 화면 전체·192 프레임 검증에서 GPU 메모리가 넘쳐 몇십 분씩 멈춤)"""
+        t = r_in.shape[2]
+        if t <= chunk + 2 * self.REFINE_HALO:
+            return self.refine(r_in)
+        outs = []
+        for s in range(0, t, chunk):
+            e = min(t, s + chunk)
+            a, z = max(0, s - self.REFINE_HALO), min(t, e + self.REFINE_HALO)
+            outs.append(self.refine(r_in[:, :, a:z])[:, :, s - a:s - a + (e - s)])
+        return torch.cat(outs, 2)
+
     def forward(self, X: torch.Tensor) -> dict:
         b, t, _, H, W = X.shape
         xl = srgb_to_lin(X)
@@ -151,7 +166,7 @@ class CorrNet(nn.Module):
         else:                                            # 절제 H−phys: 역산 없이 입력에서 잔차
             yp, y0 = xlf, xlf
         r_in = torch.cat([xlf, yp, Au, Bu, lost, fu], 1).view(b, t, -1, H, W).transpose(1, 2)
-        res = self.refine(r_in)
+        res = self.refine(r_in) if self.training else self.refine_chunked(r_in)
         Y = (y0.view(b, t, 3, H, W) + res.transpose(1, 2)).clamp(0, 1)
         sh = lambda z: z.view(b, t, *z.shape[1:])
         return {"Y": Y, "A": sh(A), "B": sh(Bv), "haz": sh(haz), "lost": sh(lost), "Yphys": sh(yp)}
