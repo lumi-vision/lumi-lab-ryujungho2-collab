@@ -197,6 +197,12 @@ def main():
                          "프로세스 메모리가 epoch 마다 늘어 시스템 메모리 61 GB 가 바닥난 문제(2026-11-21) 대응")
     ap.add_argument("--mem-frac", type=float, default=0.85, help="GPU 메모리 상한 — 넘으면 시스템 메모리로 넘쳐 몇 배 느려지는 대신 오류를 내고 그 단계를 건너뛴다")
     a = ap.parse_args()
+    # 멈춤 진단(2026-11-21: GPU·CPU 거의 쉬는 채로 멈춤이 반복): 5 분마다 모든 스레드 스택을 파일에 덧붙인다
+    import faulthandler
+    (ROOT / "data" / "correction" / "logs").mkdir(parents=True, exist_ok=True)
+    _fh = open(ROOT / "data" / "correction" / "logs" / f"{a.run}_stacks.txt", "a", encoding="utf-8")
+    _fh.write("\n===== start " + time.strftime("%Y-%m-%d %H:%M:%S") + f" pid {os.getpid()}\n"); _fh.flush()
+    faulthandler.dump_traceback_later(300, repeat=True, file=_fh)
     torch.cuda.set_per_process_memory_fraction(a.mem_frac)
     torch.manual_seed(a.seed)
     rng = np.random.default_rng(a.seed)
