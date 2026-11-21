@@ -16,7 +16,8 @@ $runs = @(
   @("abl_nolayer", "--w-layer", "0"),
   @("abl_nosafe", "--w-safe", "0"),
   @("h_s1", "--seed", "1"),
-  @("h_s2", "--seed", "2")
+  @("h_s2", "--seed", "2"),
+  @("cnn_e0", "--no-attn", "--no-phys", "--w-layer", "0", "--w-safe", "0")
 )
 foreach ($r in $runs) {
   $name = $r[0]
@@ -30,4 +31,4 @@ foreach ($r in $runs) {
     Start-Process -FilePath $py -ArgumentList $argv -NoNewWindow -Wait -RedirectStandardOutput "$logdir\${name}_try$try.log" -RedirectStandardError "$logdir\${name}_try$try.err"
   }
 }
-Log "done"
+Log "queue finished"

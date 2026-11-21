@@ -23,6 +23,9 @@ import threading
 import time
 from pathlib import Path
 
+import os
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")   # 조각화로 '예약됐지만 빈' 메모리가 2.5 GB 쌓여 메모리 부족이 났다(2026-11-21)
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -145,10 +148,15 @@ def validate(net, d: Path, ids: list[str], dev, a) -> dict:
     net.eval()
     acc, ps = {}, []
     rng = np.random.default_rng(0)
+    torch.cuda.empty_cache()
     for it in loader(d, ids, workers=4):
-        b = to_tensors(it, dev, None, rng)
-        with torch.autocast("cuda", dtype=torch.bfloat16):
-            o = net(b["X"])
+        try:
+            b = to_tensors(it, dev, None, rng)
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                o = net(b["X"])
+        except torch.OutOfMemoryError:                     # 검증도 메모리 부족이면 그 표본만 건너뜀(수를 기록)
+            torch.cuda.empty_cache(); acc.setdefault("skipped_oom", []).append(1.0)
+            continue
         _, parts = compute_loss(o, b, argparse.Namespace(**{**vars(a), "w_lpips": 0.0}))
         for k, v in parts.items():
             acc.setdefault(k, []).append(v)
