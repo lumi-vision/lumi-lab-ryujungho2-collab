@@ -10,6 +10,8 @@ Log "waiting for training queue"
 while (-not (Select-String -Path "$logdir\queue.log" -Pattern "queue finished$" -Quiet -ErrorAction SilentlyContinue)) { Start-Sleep 120 }
 # then the 60-epoch extra runs (run_long_runs.ps1) must finish too
 while (-not (Select-String -Path "$logdir\long.log" -Pattern "long finished$" -Quiet -ErrorAction SilentlyContinue)) { Start-Sleep 120 }
+# and the extra extension (run_extra_runs.ps1, h_s1_e60)
+while (-not (Select-String -Path "$logdir\extra.log" -Pattern "extra finished$" -Quiet -ErrorAction SilentlyContinue)) { Start-Sleep 120 }
 # every finished model (protocol runs + extensions), in name order
 $models = @(Get-ChildItem "data\correction\*.done" | ForEach-Object { $_.BaseName } | Where-Object { $_ -notmatch "crashed" } | Sort-Object)
 Log "models: $($models -join ' ')"
