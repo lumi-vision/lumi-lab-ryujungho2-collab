@@ -163,6 +163,8 @@ def validate(net, d: Path, ids: list[str], dev, a) -> dict:
         rec = F.interpolate(b["A"].mean(2, keepdim=True).flatten(0, 1), size=b["Y"].shape[-2:], mode="nearest").view(*b["Y"].shape[:2], 1, *b["Y"].shape[-2:]) >= A_MIN
         mse = (((o["Y"].float() - b["Y"]) ** 2) * rec).sum() / (rec.sum() * 3).clamp_min(1)
         ps.append(float(-10 * torch.log10(mse.clamp_min(1e-10))))
+    b = o = None
+    torch.cuda.empty_cache()                              # 검증(화면 전체)이 남긴 캐시를 비워 다음 epoch 첫 단계의 메모리 부족을 막음
     net.train()
     out = {k: round(float(np.mean(v)), 5) for k, v in acc.items()}
     out["psnr_rec"] = round(float(np.mean(ps)), 3)
@@ -324,4 +326,8 @@ if __name__ == "__main__":
         main()
     except BaseException:
         traceback.print_exc(); sys.stderr.flush(); sys.stdout.flush()
+        if os.name == "nt":                              # os._exit(=ExitProcess) 도 CUDA 드라이버 정리에서 멈춤 → 정리 없이 끝냄
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            k32.TerminateProcess(k32.GetCurrentProcess(), 3)
         os._exit(3)
