@@ -194,7 +194,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--resume", action="store_true", help="data/correction/<run>.last.pt 에서 이어 학습(옵티마이저·난수·기록 포함)")
-    ap.add_argument("--stop-after-epochs", type=int, default=4,
+    ap.add_argument("--stop-after-epochs", type=int, default=2,
                     help="이 프로세스에서 N epoch 를 돌면 이어 하기 상태를 남기고 끝낸다(대기열이 --resume 으로 다시 띄움). "
                          "프로세스 메모리가 epoch 마다 늘어 시스템 메모리 61 GB 가 바닥난 문제(2026-11-21) 대응")
     ap.add_argument("--mem-frac", type=float, default=0.85, help="GPU 메모리 상한 — 넘으면 시스템 메모리로 넘쳐 몇 배 느려지는 대신 오류를 내고 그 단계를 건너뛴다")
