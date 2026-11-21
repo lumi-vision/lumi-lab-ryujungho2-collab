@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import queue
 import sys
@@ -74,8 +75,18 @@ def loader(d: Path, ids: list[str], workers: int = 4, depth: int = 6):
     q: queue.Queue = queue.Queue(depth)
 
     def run():
+        # 2026-11-22: ex.map 은 ids 전체를 한꺼번에 제출해 작업자가 소비 속도와 무관하게 끝까지 디코드했다
+        # (표본당 약 200 MB × 600 → 프로세스 커밋 ~100 GB, 'epoch 마다 메모리가 는다' 의 원인).
+        # → 미리 제출하는 수를 depth 로 묶는다. 순서·내용은 같으므로 학습 결과는 바뀌지 않는다.
+        import collections
+        src = iter(ids)
         with cf.ThreadPoolExecutor(workers) as ex:
-            for it in ex.map(lambda s: load_item(d, s), ids):
+            futs = collections.deque(ex.submit(load_item, d, s) for s in itertools.islice(src, depth))
+            while futs:
+                it = futs.popleft().result()
+                nxt = next(src, None)
+                if nxt is not None:
+                    futs.append(ex.submit(load_item, d, nxt))
                 q.put(it)
         q.put(None)
 
