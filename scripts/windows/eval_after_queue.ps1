@@ -8,7 +8,9 @@ function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Out-File -Ap
 Log "waiting for training queue"
 # the queue writes exactly "queue finished" as its last line (do not match other lines containing "done")
 while (-not (Select-String -Path "$logdir\queue.log" -Pattern "queue finished$" -Quiet -ErrorAction SilentlyContinue)) { Start-Sleep 120 }
-$models = @("h_s0", "h_s1", "h_s2", "abl_noattn", "abl_nophys", "abl_nolayer", "abl_nosafe", "cnn_e0")
+# then the 60-epoch extra runs (run_long_runs.ps1) must finish too
+while (-not (Select-String -Path "$logdir\long.log" -Pattern "long finished$" -Quiet -ErrorAction SilentlyContinue)) { Start-Sleep 120 }
+$models = @("h_s0", "h_s1", "h_s2", "abl_noattn", "abl_nophys", "abl_nolayer", "abl_nosafe", "cnn_e0", "h_s0_e60", "abl_noattn_e60")
 foreach ($step in @(@("val", "--split", "val", "--limit", "70"), @("test", "--split", "test"), @("kaya", "--real", "kaya"))) {
   Log "eval $($step[0])"
   $argv = @("-u", "scripts\eval_correction.py", "--team-dir", $TeamDir, "--data", $Data, "--tag", "all", "--models") + $models + $step[1..($step.Count - 1)]

@@ -4,7 +4,7 @@ Set-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 $logdir = "data\correction\logs"
 function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Out-File -Append -Encoding ascii "$logdir\watchdog.log" }
 Log "start (stale > $StaleMin min)"
-while (-not (Select-String -Path "$logdir\queue.log" -Pattern "queue finished$" -Quiet -ErrorAction SilentlyContinue)) {
+while (-not (Select-String -Path "$logdir\long.log" -Pattern "long finished$" -Quiet -ErrorAction SilentlyContinue)) {
   Start-Sleep 60
   $procs = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'train_correction\.py' }
   if (-not $procs) { continue }
@@ -17,4 +17,4 @@ while (-not (Select-String -Path "$logdir\queue.log" -Pattern "queue finished$" 
     Start-Sleep 120
   }
 }
-Log "queue finished -> exit"
+Log "long finished -> exit"
