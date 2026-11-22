@@ -27,7 +27,7 @@ from torch.nn import functional as F
 from lumi_synth import measure, oracle
 from lumi_synth.gan import (HAZARDS, SOFT_JUDGE_VERSION, STRIPE_LO, stripe_reversal, FrameDiscriminator, judge_loss, judge_loss_red, judge_loss_stripe,
                             luminance_rel, make_generator, palette_diversity, random_frames, red_crisp_loss, spectral_diversity, srgb_to_linear,
-                            stripe_diversity)
+                            stripe_diversity, moving_mask)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -123,6 +123,8 @@ def main() -> None:
                          "| z2(v3: v2 + 덮는 정도의 시간 흐림 σ 0~12 프레임 — 진짜 정지 줄무늬. --zdim 10)")
     ap.add_argument("--lum-smooth", action="store_true",
                     help="휘도 전용: z 의 마지막 성분으로 시간 흐림(σ 0~2 프레임)을 정해 사인·삼각파꼴 깜빡임도 만들게 한다(gan.temporal_blur)")
+    ap.add_argument("--moving-masks", action="store_true", help="일부 학습 마스크를 시간에 따라 이동시킨다")
+    ap.add_argument("--mask-speed", type=float, default=0.15, help="마스크 축별 최대 이동 속도(화면 너비·높이/초)")
     ap.add_argument("--div-norm", action="store_true",
                     help="다양성 손실에서 스펙트럼을 크기로 정규화(세기가 아니라 리듬 차이만 봄, 실험용 — gan.spectral_diversity)")
     ap.add_argument("--overwrite", action="store_true", help="같은 이름의 체크포인트가 있어도 덮어쓴다(기본: 멈춤 — 학습한 매개변수 보호)")
@@ -144,6 +146,8 @@ def main() -> None:
                          "동작 확인만이라면 --debug-scale 를 함께 주세요.")
     if args.batch_size < 2 or args.batch_size % 2:
         raise SystemExit("--batch-size 는 2 이상의 짝수여야 합니다(목표 '위험'/'근처 안전'을 절반씩).")
+    if not np.isfinite(args.mask_speed) or args.mask_speed < 0:
+        raise SystemExit("--mask-speed 는 0 이상의 유한수여야 합니다")
 
     if args.checkpoint.exists() and not args.overwrite:
         raise SystemExit(f"{args.checkpoint} 가 이미 있습니다(학습한 매개변수). 다른 --checkpoint 이름을 쓰거나 --overwrite")
@@ -207,6 +211,10 @@ def main() -> None:
         b = args.batch_size
         clean = to_tensor(bg[rng.integers(0, n, b)], device)
         mask = torch.from_numpy(sample_masks(b, h, w, rng, args.hazard)).to(device).float()[:, None, None]  # [B,1,1,H,W]
+        if args.moving_masks:
+            velocity = rng.uniform(-args.mask_speed, args.mask_speed, (b, 2)).astype(np.float32)
+            velocity[rng.random(b) < 0.5] = 0  # 정지와 이동을 함께 학습
+            mask = moving_mask(mask, t, fps, torch.from_numpy(velocity).to(device))
         target = torch.from_numpy((np.arange(b) % 2 == 0).astype(np.float32)).to(device)        # 위험/근처 절반씩
         z1, z2 = torch.randn(b, args.zdim, device=device), torch.randn(b, args.zdim, device=device)
 

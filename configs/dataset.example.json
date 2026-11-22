@@ -1,0 +1,8 @@
+{
+  "action": "register",
+  "dataset_version": "phase1-example",
+  "output": "data/datasets/example/manifest.jsonl",
+  "sources": [
+    {"path": "data/example/normal.mkv", "work_id": "example-work-1", "license": "확인 필요", "role": "unassigned"}
+  ]
+}

@@ -658,7 +658,7 @@ def spectral_diversity(delta1, delta2, mask, z1, z2, normalize: bool = False):
       크기가 빛의 세기에 비례해서, G 가 리듬 대신 세기를 바꿔도 손실이 줄어든다 — λ_div 를 키울수록 빛이 세지고
       질감이 줄던 원인으로 추정한 것(checks/gan/u_sweep_SUMMARY.md §C). 정규화하면 세기만 다른 두 빛은 차이 0 이다.
     """
-    msum = mask.sum(dim=(2, 3, 4)) + 1e-6                            # [B,1]
+    msum = mask.sum(dim=(3, 4))[:, 0].clamp_min(1e-6)               # [B,1] or [B,T]
     s1 = (delta1 * mask).sum(dim=(3, 4))[:, 0] / msum                # [B,T]
     s2 = (delta2 * mask).sum(dim=(3, 4))[:, 0] / msum
     f1 = torch.fft.rfft(s1 - s1.mean(1, keepdim=True), dim=1).abs()
@@ -668,6 +668,25 @@ def spectral_diversity(delta1, delta2, mask, z1, z2, normalize: bool = False):
         f2 = f2 / (f2.norm(dim=1, keepdim=True) + 1e-6)
     gap = (f1 - f2).abs().mean(1)
     return -(gap / ((z1 - z2).abs().mean(1) + 1e-6)).mean()
+
+
+def moving_mask(mask: torch.Tensor, frames: int, fps: float, velocity: torch.Tensor) -> torch.Tensor:
+    """Translate a static mask over time. Velocity is normalized frame widths/heights per second.
+
+    Returns [B,1,T,H,W]; clipped at image boundaries. Velocity is specified per clip.
+    """
+    if mask.ndim != 5 or mask.shape[1:3] != (1, 1) or velocity.shape != (mask.shape[0], 2):
+        raise ValueError("expected mask [B,1,1,H,W] and velocity [B,2]")
+    if frames < 1 or fps <= 0 or not math.isfinite(fps):
+        raise ValueError("frames and fps must be positive")
+    b, _, _, h, w = mask.shape
+    times = torch.arange(frames, device=mask.device, dtype=mask.dtype) / fps
+    theta = torch.eye(2, 3, device=mask.device, dtype=mask.dtype)[None, None].repeat(b, frames, 1, 1)
+    theta[:, :, :, 2] = -2 * velocity.to(device=mask.device, dtype=mask.dtype)[:, None, :] * times[None, :, None]
+    grid = F.affine_grid(theta.reshape(-1, 2, 3), (b * frames, 1, h, w), align_corners=False)
+    base = mask[:, :, 0].repeat_interleave(frames, dim=0)
+    shifted = F.grid_sample(base, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
+    return shifted.reshape(b, frames, 1, h, w).permute(0, 2, 1, 3, 4)
 
 
 def random_frames(video: torch.Tensor, k: int) -> torch.Tensor:

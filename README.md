@@ -2,7 +2,9 @@
 
 LUMI 프로젝트 개인 실험 저장소입니다. 2026-11-08에 처음부터 다시 설계하기 위해 초기화했습니다.
 
-- 데이터 출처: [DATA_SOURCES.md](DATA_SOURCES.md)
+- 데이터 통합 현황(로컬 보유·수량·분할): [docs/DATA_INVENTORY.md](docs/DATA_INVENTORY.md)
+- Phase 1 데이터셋 관리: [실행 방법](docs/dataset_readme.md) · [스키마](docs/dataset_schema.md) · [기존 데이터 조사](docs/dataset_audit.md)
+- 데이터 출처 상세: [DATA_SOURCES.md](DATA_SOURCES.md)
 - 초기화 전 작업 전체: 브랜치 [`archive/2026-11-08-before-reset`](https://github.com/lumi-vision/lumi-lab-ryujungho2-collab/tree/archive/2026-11-08-before-reset) (태그 `before-reset-2026-11-08`)
 
 - **현황 보고 (먼저 읽기)**: [docs/reports/STAGE_hazard_generators_2026-11-12.md](docs/reports/STAGE_hazard_generators_2026-11-12.md) — 위험 3종 생성기 단계 보고. 2026-11-13: 판정기 버그 6건 수정([docs/STANDARDS.md](docs/STANDARDS.md) §8 참고)

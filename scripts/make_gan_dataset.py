@@ -4,6 +4,7 @@ eval_gan.py 가 저장하는 data/gan/val/ 은 G 평가용(purpose=evaluation_on
 이 스크립트는 train 바탕(backgrounds_train.npz)으로만 샘플을 만들어 오라클 train 샘플과 같은 형식으로 저장한다.
 
 실행 예
+    python scripts/make_gan_dataset.py geometry --out data/geometry_candidates --count 1
     python scripts/make_gan_dataset.py --checkpoint data/gan/gan_v1_div05.pt --z-per-clip 2
 
 출력
@@ -38,7 +39,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @torch.no_grad()
 def main() -> int:
-    ap = argparse.ArgumentParser(description="탐지 모델 학습용 GAN 샘플 (train 바탕만)")
+    if sys.argv[1:2] == ["geometry"]:
+        from lumi_synth.lumi_geometry_motion import main as create_geometry
+        create_geometry(sys.argv[2:])
+        return 0
+    ap = argparse.ArgumentParser(description="탐지 모델 학습용 GAN 샘플 (train 바탕만)",
+                                 epilog="기하학 후보와 객체 주석 생성: make_gan_dataset.py geometry --help")
     ap.add_argument("--data", type=Path, default=ROOT / "data" / "oracle_768x432_24fps")
     ap.add_argument("--allow-mismatch", action="store_true", help="G 학습 해상도·fps 와 달라도 진행(기록됨)")
     ap.add_argument("--checkpoint", type=Path, required=True)
