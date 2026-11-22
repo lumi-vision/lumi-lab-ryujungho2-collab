@@ -134,6 +134,7 @@ def model_correct(name: str, x: np.ndarray) -> np.ndarray:
         up = torch.nn.functional.interpolate(delta, size=(H, W), mode="bilinear", align_corners=False)
         xl = torch.as_tensor(LUT, device="cuda")[torch.from_numpy(x).cuda().long()].permute(0, 3, 1, 2)
         out = (lin_to_srgb((xl + up).clamp(0, 1)) * 255).round().byte().permute(0, 2, 3, 1).cpu().numpy()
+    torch.cuda.empty_cache()
     return out
 
 
@@ -203,7 +204,7 @@ def main():
     ids = ids[a.si::a.sk]
     out_rows = base_rows if a.sk == 1 else base_rows.with_name(base_rows.stem + f".s{a.si}.jsonl")
     out_rows.parent.mkdir(parents=True, exist_ok=True)
-    done = {(json.loads(l)["id"], json.loads(l)["method"]) for l in out_rows.read_text(encoding="utf-8").splitlines() if l.strip()} if out_rows.exists() else set()
+    done = done_set(base_rows, "id")                       # 조각 수를 바꿔 다시 띄워도 끝난 (표본, 방법)은 건너뜀
     tmp = ROOT / "data" / "correction" / f"tmp_eval_s{a.si}"
     tmp.parent.mkdir(parents=True, exist_ok=True)
     print(f"표본 {len(ids)} · 방법 {methods}", flush=True)
@@ -273,6 +274,18 @@ def main():
         report(out_rows, ROOT / "checks" / "correction" / f"eval_{a.split}_{tag}.md", methods)
 
 
+def done_set(base: Path, key: str) -> set:
+    """<base> 와 모든 조각 파일에서 오류 없이 끝난 (key, method)."""
+    out = set()
+    for q in sorted(base.parent.glob(base.stem + ".s*.jsonl")) + ([base] if base.exists() else []):
+        for l in q.read_text(encoding="utf-8").splitlines():
+            if l.strip():
+                r = json.loads(l)
+                if "error" not in r:
+                    out.add((r[key], r["method"]))
+    return out
+
+
 def merge_rows(base: Path) -> Path:
     """조각별 행 파일(<base>.s<i>.jsonl)과 <base> 를 하나로 모은다."""
     parts = sorted(base.parent.glob(base.stem + ".s*.jsonl")) + ([base] if base.exists() else [])
@@ -332,7 +345,7 @@ def main_real(a) -> None:
         return report_real(merge_rows(base_rows), ROOT / "checks" / "correction" / f"eval_kaya_{tag}.md", methods)
     files = files[a.si::a.sk]
     out_rows = base_rows if a.sk == 1 else base_rows.with_name(base_rows.stem + f".s{a.si}.jsonl")
-    done = {(json.loads(l)["file"], json.loads(l)["method"]) for l in out_rows.read_text(encoding="utf-8").splitlines() if l.strip()} if out_rows.exists() else set()
+    done = done_set(base_rows, "file")
     tmp = ROOT / "data" / "correction" / f"tmp_eval_s{a.si}"
     import make_hazard7_dataset as mk
     print(f"Kaya {len(files)} · 방법 {methods}", flush=True)
