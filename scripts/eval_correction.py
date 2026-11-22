@@ -109,6 +109,11 @@ def b2_partial(x_path: Path, tmp: Path, team_dir: str) -> np.ndarray:
     return y
 
 
+# 우리 판정기(numpy, 방법당 ~11 s CPU)는 스레드에서 GPU 작업과 겹쳐 돌린다(결과 동일, 실행 순서만 다름)
+import concurrent.futures as _cf  # noqa: E402
+POOL = _cf.ThreadPoolExecutor(3)
+POOL_DEPTH = 4                                             # 끝나지 않은 판정이 이보다 많으면 기다림(메모리 상한)
+
 # ---------------- 모델 ----------------
 _NETS: dict = {}
 
@@ -153,8 +158,13 @@ def metrics(y: np.ndarray, clean: np.ndarray, regs: dict, flow, base_warp: float
     out = {}
     lp = quality.lpips_map(y[::lp_every], clean[::lp_every])
     ss = quality.ssim_map(y, clean)
+    se = ((y.astype(np.float32) - clean.astype(np.float32)) ** 2).sum(-1)   # 픽셀별 채널 합 — quality.psnr 과 같은 값, 한 번만 계산
     for k, m in regs.items():
-        out[f"psnr_{k}"] = round(quality.psnr(y, clean, m), 3)
+        if not m.any():
+            out[f"psnr_{k}"] = float("nan")
+        else:
+            mse = float(se[m].sum() / (m.sum() * 3))
+            out[f"psnr_{k}"] = round(float("inf") if mse == 0 else float(10 * np.log10(255.0 ** 2 / mse)), 3)
         out[f"ssim_{k}"] = round(quality.masked_mean(ss, m), 4)
         mm = m[::lp_every]
         out[f"lpips_{k}"] = round(quality.masked_mean(lp, mm), 4)
@@ -215,6 +225,7 @@ def main():
             flow = quality.clean_flow(clean)
             base_warp = quality.warp_error(clean, flow, changed)
             team_x = team_judge(x, a.team_dir)
+            pend = []                                              # (행, 우리 판정 future) — CPU 판정을 GPU 작업과 겹쳐 돌림
             for m in todo:
                 t0 = time.time()
                 try:
@@ -235,16 +246,27 @@ def main():
                     sec = time.time() - t0
                     n = min(len(y), len(clean))
                     y = y[:n]
+                    fut = POOL.submit(ours_judge, y)
                     tj = team_judge(y, a.team_dir)
                     safe, left = safe_after(tj["masks"], clean_masks[:, :n])
-                    oj = ours_judge(y)
                     row = {"id": sid, "method": m, "kind": g["kind"], "intent": g["intent"], "hazard_before": bool(g.get("added_labels")),
-                           "labels_before": g.get("added_labels"), "safe_team": safe, "left_labels": left,
-                           "safe_ours": not (oj["lum"] or oj["red"] or oj["ext_lum"] or oj["ext_red"]), "sec": round(sec, 2),
+                           "labels_before": g.get("added_labels"), "safe_team": safe, "left_labels": left, "sec": round(sec, 2),
                            **metrics(y, clean[:n], {k: v[:n] for k, v in regs.items()}, flow[:n - 1], base_warp)}
+                    pend.append((row, fut))
                 except Exception as e:  # noqa: BLE001
                     import traceback
                     row = {"id": sid, "method": m, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]}
+                    pend.append((row, None))
+                y = None
+                while sum(1 for _, q in pend if q is not None and not q.done()) > POOL_DEPTH:
+                    time.sleep(0.2)
+            for row, fut in pend:
+                if fut is not None:
+                    try:
+                        oj = fut.result()
+                        row["safe_ours"] = not (oj["lum"] or oj["red"] or oj["ext_lum"] or oj["ext_red"])
+                    except Exception as e:  # noqa: BLE001
+                        row = {"id": row["id"], "method": row["method"], "error": f"ours_judge {type(e).__name__}: {e}"}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
             print(f"  {i}/{len(ids)} {sid}", flush=True)
     if a.sk == 1:
