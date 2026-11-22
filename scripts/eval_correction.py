@@ -31,6 +31,29 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
+
+
+def limit_cpu(mask: int = 0x00FF) -> None:
+    """2026-11-23 사용자 요청: CPU 사용률·온도를 낮춘다 — 논리 코어 8 개(0xFF)·우선순위 '보통 이하'·스레드 수 제한.
+    결과에는 영향 없음(속도만). 환경변수 LUMI_CPU_MASK 로 바꿀 수 있다."""
+    import os
+    mask = int(os.environ.get("LUMI_CPU_MASK", str(mask)), 0)
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.SetProcessAffinityMask.argtypes = [wintypes.HANDLE, ctypes.c_size_t]
+        k32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        h = k32.GetCurrentProcess()
+        k32.SetProcessAffinityMask(h, mask)
+        k32.SetPriorityClass(h, 0x00004000)                  # BELOW_NORMAL_PRIORITY_CLASS
+    n = max(1, bin(mask).count("1") // 2)
+    torch.set_num_threads(n)
+    cv2.setNumThreads(n)
+
+
+limit_cpu()
 from lumi_synth import hazard7, quality  # noqa: E402
 from lumi_synth.corrnet import CorrNet, lin_to_srgb, srgb_to_lin  # noqa: E402
 from make_hazard7_dataset import FPS, H, W, decode, encode, ours_judge  # noqa: E402
