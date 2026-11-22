@@ -173,7 +173,11 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--tag", default="")
     ap.add_argument("--real", default="", choices=("", "kaya"), help="kaya: 실제 위험 영상 22 개(원본 없음)")
+    ap.add_argument("--shard", default="0/1", help="i/k: 표본을 k 조각으로 나눠 i 번째만(여러 프로세스가 GPU 를 함께 씀). 행 파일은 조각별")
+    ap.add_argument("--report-only", action="store_true", help="조각별 행 파일을 모아 보고서만 다시 씀")
+    ap.add_argument("--save-models", nargs="*", default=[], help="(Kaya) 이 방법들의 보정 결과 영상을 data/correction/kaya_out/<방법>/ 에 저장(육안 확인용)")
     a = ap.parse_args()
+    a.si, a.sk = (int(v) for v in a.shard.split("/"))
     if a.real:
         return main_real(a)
     d = ROOT / "data" / "hazard7" / a.data / a.split
@@ -182,11 +186,15 @@ def main():
     if a.limit:
         ids = ids[::max(1, len(ids) // a.limit)][:a.limit]
     tag = a.tag or "_".join(a.models) or "baselines"
-    out_rows = ROOT / "checks" / "correction" / f"eval_{a.split}_{tag}_rows.jsonl"
+    methods = a.baselines + a.models
+    base_rows = ROOT / "checks" / "correction" / f"eval_{a.split}_{tag}_rows.jsonl"
+    if a.report_only:
+        return report(merge_rows(base_rows), ROOT / "checks" / "correction" / f"eval_{a.split}_{tag}.md", methods)
+    ids = ids[a.si::a.sk]
+    out_rows = base_rows if a.sk == 1 else base_rows.with_name(base_rows.stem + f".s{a.si}.jsonl")
     out_rows.parent.mkdir(parents=True, exist_ok=True)
     done = {(json.loads(l)["id"], json.loads(l)["method"]) for l in out_rows.read_text(encoding="utf-8").splitlines() if l.strip()} if out_rows.exists() else set()
-    methods = a.baselines + a.models
-    tmp = ROOT / "data" / "correction" / "tmp_eval"
+    tmp = ROOT / "data" / "correction" / f"tmp_eval_s{a.si}"
     tmp.parent.mkdir(parents=True, exist_ok=True)
     print(f"표본 {len(ids)} · 방법 {methods}", flush=True)
     with out_rows.open("a", encoding="utf-8") as f:
@@ -239,7 +247,16 @@ def main():
                     row = {"id": sid, "method": m, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
             print(f"  {i}/{len(ids)} {sid}", flush=True)
-    report(out_rows, ROOT / "checks" / "correction" / f"eval_{a.split}_{tag}.md", methods)
+    if a.sk == 1:
+        report(out_rows, ROOT / "checks" / "correction" / f"eval_{a.split}_{tag}.md", methods)
+
+
+def merge_rows(base: Path) -> Path:
+    """조각별 행 파일(<base>.s<i>.jsonl)과 <base> 를 하나로 모은다."""
+    parts = sorted(base.parent.glob(base.stem + ".s*.jsonl")) + ([base] if base.exists() else [])
+    merged = base.with_name(base.stem + ".merged.jsonl")
+    merged.write_text("".join(q.read_text(encoding="utf-8") for q in parts), encoding="utf-8")
+    return merged
 
 
 # ---------------- 실제 영상 (Kaya 2025 원본 22 개, 원본 없음) ----------------
@@ -287,10 +304,14 @@ def main_real(a) -> None:
     if a.limit:
         files = files[:a.limit]
     tag = a.tag or "_".join(a.models) or "baselines"
-    out_rows = ROOT / "checks" / "correction" / f"eval_kaya_{tag}_rows.jsonl"
-    done = {(json.loads(l)["file"], json.loads(l)["method"]) for l in out_rows.read_text(encoding="utf-8").splitlines() if l.strip()} if out_rows.exists() else set()
+    base_rows = ROOT / "checks" / "correction" / f"eval_kaya_{tag}_rows.jsonl"
     methods = [m for m in a.baselines if m not in ("B0v",)] + a.models
-    tmp = ROOT / "data" / "correction" / "tmp_eval"
+    if a.report_only:
+        return report_real(merge_rows(base_rows), ROOT / "checks" / "correction" / f"eval_kaya_{tag}.md", methods)
+    files = files[a.si::a.sk]
+    out_rows = base_rows if a.sk == 1 else base_rows.with_name(base_rows.stem + f".s{a.si}.jsonl")
+    done = {(json.loads(l)["file"], json.loads(l)["method"]) for l in out_rows.read_text(encoding="utf-8").splitlines() if l.strip()} if out_rows.exists() else set()
+    tmp = ROOT / "data" / "correction" / f"tmp_eval_s{a.si}"
     import make_hazard7_dataset as mk
     print(f"Kaya {len(files)} · 방법 {methods}", flush=True)
     with out_rows.open("a", encoding="utf-8") as f:
@@ -324,6 +345,10 @@ def main_real(a) -> None:
                         y = model_correct_long(m, x)
                     sec = time.time() - t0
                     n = min(len(x), len(y)); y = y[:n]
+                    if m in a.save_models:                         # 육안 확인용(사용자가 본다). 원본 해상도·fps
+                        od = ROOT / "data" / "correction" / "kaya_out" / m
+                        od.mkdir(parents=True, exist_ok=True)
+                        encode_any(y, od / f"{p.stem}.mp4", fps)
                     tj = team_judge(y, a.team_dir)
                     oj = ours_judge_fps(y, fps)
                     lp = quality.lpips_map(y[:n:8], x[:n:8])
@@ -341,7 +366,8 @@ def main_real(a) -> None:
                     row = {"file": p.name, "method": m, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
             print(f"  {i}/{len(files)} {p.name}", flush=True)
-    report_real(out_rows, ROOT / "checks" / "correction" / f"eval_kaya_{tag}.md", methods)
+    if a.sk == 1:
+        report_real(out_rows, ROOT / "checks" / "correction" / f"eval_kaya_{tag}.md", methods)
 
 
 def encode_any(x: np.ndarray, path: Path, fps: float) -> None:
