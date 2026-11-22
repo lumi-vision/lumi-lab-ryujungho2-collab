@@ -27,4 +27,7 @@ function Extend($src, $name, $maxEp, $extra) {
 Log "waiting for long runs"
 while (-not (Select-String -Path "$logdir\long.log" -Pattern "long finished$" -Quiet -ErrorAction SilentlyContinue)) { Start-Sleep 120 }
 Extend "h_s1" "h_s1_e60" 60 @("--seed", "1")
+# 2026-11-22 11:45 (user decision): abl_nophys kept improving through +10 (best = epoch 40, PSNR 29.53)
+#  -> continue from the plus10 state to 60 epochs with the normal rule (early stopping patience 4), like the other _e60 runs
+Extend "abl_nophys_plus10" "abl_nophys_e60" 60 @("--no-phys")
 Log "extra finished"
