@@ -312,6 +312,8 @@ class PartialMaskConfig:
     enable_gabor_fallback: bool = True
     # 판정기 v2 (2026-11-24): 패턴 면적 조건을 '화면 전체 국소 대비 면적' 대신 실제 패턴 마스크 면적으로 (ITC/Ofcom·BT.1702-3 Att.1: 패턴이 화면 > 40 %)
     pattern_area_from_mask: bool = False
+    # 판정기 v2: 링(방사·동심) 검출이 찾은 영역 면적도 패턴 면적에 포함 (pattern_area_from_mask 와 함께)
+    pattern_area_radial: bool = False
 
 
 @dataclass(slots=True)

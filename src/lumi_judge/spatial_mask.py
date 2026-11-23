@@ -1268,7 +1268,7 @@ class PartialStaticPatternDetector(StaticPatternDetector):
             if float(coarse_ok.float().mean().item()) <= self.pse.pattern_area_min:
                 return False, fine_area, 0, 0.0
             ring_centers, _ = self._estimate_separated_centers(lum_aa_4d)
-            rad_pairs, rad_cpd, rad_area, _ = self._scan_rings_enhanced(lum_aa_4d, ring_centers)
+            rad_pairs, rad_cpd, rad_area, _ = self._scan_rings_enhanced_rec(lum_aa_4d, ring_centers)
             if rad_pairs >= self.pse.pattern_min_pairs and rad_area > self.pse.pattern_area_min:
                 return True, rad_area, rad_pairs, rad_cpd
             return False, fine_area, 0, 0.0
@@ -1340,7 +1340,7 @@ class PartialStaticPatternDetector(StaticPatternDetector):
 
         # Step B: Separated Sobel Top-2 Tangent -> Rings, Top-2 Normal -> Spokes
         ring_centers, spoke_centers = self._estimate_separated_centers(lum_aa_4d)
-        r_pairs, r_cpd, r_area, _ = self._scan_rings_enhanced(
+        r_pairs, r_cpd, r_area, _ = self._scan_rings_enhanced_rec(
             lum_aa_4d, ring_centers, min_shell_area=0.10
         )
         if r_pairs > best_pairs:
@@ -1809,6 +1809,19 @@ class PartialStaticPatternDetector(StaticPatternDetector):
     # Public Inspection Entry Points
     # -----------------------------------------------------------------------
 
+    # 판정기 v2: 링(방사·동심) 검출이 찾은 영역 면적을 기록 → 패턴 면적에 반영 (마스크 추출이 방사 패턴을 작게 잡는 문제)
+    def _scan_centers_batched(self, lum_4d, centers, check_spokes=True):
+        r = super()._scan_centers_batched(lum_4d, centers, check_spokes)
+        if r[0] >= self.pse.pattern_min_pairs:
+            self._radial_area_seen = max(getattr(self, "_radial_area_seen", 0.0), float(r[2]))
+        return r
+
+    def _scan_rings_enhanced_rec(self, *a, **k):
+        r = self._scan_rings_enhanced(*a, **k)
+        if r[0] >= self.pse.pattern_min_pairs:
+            self._radial_area_seen = max(getattr(self, "_radial_area_seen", 0.0), float(r[2]))
+        return r
+
     def _extract_active_segments_mask(
         self,
         lum: torch.Tensor,
@@ -1866,7 +1879,9 @@ class PartialStaticPatternDetector(StaticPatternDetector):
 
         self._prev_lum = None
         self._prev_result = None
+        self._radial_area_seen = 0.0
         is_pat, effective_area, best_pairs, best_cpd = self.inspect_frame(lum)
+        radial_area = float(getattr(self, "_radial_area_seen", 0.0))
         res = (is_pat, effective_area, best_pairs, best_cpd)
 
         if not is_pat:
@@ -1918,7 +1933,7 @@ class PartialStaticPatternDetector(StaticPatternDetector):
 
         if getattr(self.mask_config, "pattern_area_from_mask", False):
             # 판정기 v2: 규격대로 '패턴이 차지한 면적' 으로 판정 (원본은 화면 전체 국소 대비 면적 fine_area 를 씀)
-            mask_area = float(pat_mask.float().mean().item())
+            mask_area = max(float(pat_mask.float().mean().item()), radial_area if getattr(self.mask_config, "pattern_area_radial", False) else 0.0)
             if mask_area <= self.pse.pattern_area_min:
                 res = (False, mask_area, best_pairs, best_cpd)
                 pat_mask = torch.zeros_like(lum, dtype=torch.bool)

@@ -40,6 +40,8 @@ def configs():
         "enhanced": (rep(m0, enhanced_spatial_pattern=True), p0),
         "maskarea": (rep(m0, pattern_area_from_mask=True), p0),
         "enh_maskarea": (rep(m0, enhanced_spatial_pattern=True, pattern_area_from_mask=True), p0),
+        "maskarea_rad": (rep(m0, pattern_area_from_mask=True, pattern_area_radial=True), p0),
+        "enh_maskarea_rad": (rep(m0, enhanced_spatial_pattern=True, pattern_area_from_mask=True, pattern_area_radial=True), p0),
     }
 
 
