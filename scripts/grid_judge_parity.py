@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "scripts")]
 from lumi_judge.cpu_limit import limit_cpu  # noqa: E402
 limit_cpu()
-from lumi_judge.grid_flash import judge_luminance  # noqa: E402
+from lumi_judge.grid_flash import judge_luminance, judge_red  # noqa: E402
 from lumi_synth import measure  # noqa: E402
 from make_hazard7_dataset import FPS, decode  # noqa: E402
 
@@ -27,10 +27,11 @@ def main():
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     d = ROOT / "data/hazard7/big1/val"
-    kinds = ["lum_flash_hazard", "lum_flash_near", "intersection_hazard", "scene_hazard", "lum_ext_hazard", "pattern_hazard"]
+    kinds = ["lum_flash_hazard", "lum_flash_near", "intersection_hazard", "scene_hazard", "lum_ext_hazard", "pattern_hazard",
+             "red_flash_hazard", "red_flash_near", "red_ext_hazard"]
     clips = []
     for k in kinds:
-        clips += sorted(d.glob(f"val_{k}_*.mp4"))[: max(1, a.n // len(kinds))]
+        clips += [c for c in sorted(d.glob(f"val_{k}_*.mp4")) if ".clean" not in c.name][: max(1, a.n // len(kinds))]
     clips = [c for c in clips if ".clean" not in c.name][: a.n]
     bad = 0; tg = tc = 0.0
     for p in clips:
@@ -39,6 +40,11 @@ def main():
         t0 = time.time(); r = measure.analyze(x, FPS); tc += time.time() - t0
         same = (np.array_equal(g["transitions"], r["transitions"]) and g["dangerous"] == r["dangerous"]
                 and g["max_flashes"] == r["max_flashes"] and np.array_equal(g["hazard_mask"], r["hazard_mask"]))
+        gr = judge_red(x, FPS); rr = measure.analyze_red(x, FPS)
+        same_r = (np.array_equal(gr["transitions"], rr["transitions"]) and gr["dangerous"] == rr["dangerous"]
+                  and gr["max_flashes"] == rr["max_flashes"] and np.array_equal(gr["hazard_mask"], rr["hazard_mask"]))
+        same = same and same_r
+        print(f"    적색: {'같음' if same_r else '다름'} 위험 {gr['dangerous']}/{rr['dangerous']} 깜빡임 {gr['max_flashes']}/{rr['max_flashes']}", flush=True)
         bad += not same
         print(f"  {p.name}: {'같음' if same else '다름'} · 위험 {g['dangerous']}/{r['dangerous']} · 깜빡임 {g['max_flashes']}/{r['max_flashes']}"
               f" · 근거 {g['evidence']['segments'][:1]} 면적 {g['evidence']['hazard_area_pct']}% 칸 {len(g['evidence']['cells'])}", flush=True)

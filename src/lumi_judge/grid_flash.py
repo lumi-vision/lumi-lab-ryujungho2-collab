@@ -176,3 +176,111 @@ def judge_luminance(frames_bgr: np.ndarray, fps: float, device: str = "cuda", gr
             "grid_shape": [gr, gc],
         },
     }
+
+
+# ============================== F2 적색 깜빡임 ==============================
+# measure.red_state / red_transitions / analyze_red 와 같은 정의(WCAG 2.2 적색 정의 + BT.1702-3 면적·횟수):
+#   포화 빨강: 선형 R/(R+G+B) ≥ 0.8 이고 R − G − B ≥ 0.0625 · 색도 u′v′(검정·거의 검정은 D65 고정)
+#   전이: 바로 앞 프레임 대비 Δu′v′ > 0.2 이고 포화 빨강으로/에서 바뀜 · 반대 방향 변화끼리 짝지은 것만 셈
+CLAUSE_F2 = "ITU-R BT.1702-3 Annex 1 Guideline 1 (포화 적색으로의/으로부터의 전이) · 적색 정의 WCAG 2.2 (R/(R+G+B) ≥ 0.8, Δu′v′ > 0.2)"
+RED_SAT_RATIO, RED_DELTA_UV, RED_MIN_EXCESS, RED_CHANGE_EPS, RED_BLACK_Y = 0.8, 0.2, 0.0625, 0.02, 0.005
+D65_UV = (0.1978, 0.4683)
+_XYZ = torch.tensor([[0.4124564, 0.3575761, 0.1804375],
+                     [0.2126729, 0.7151522, 0.0721750],
+                     [0.0193339, 0.1191920, 0.9503041]], dtype=torch.float64)
+
+
+@torch.no_grad()
+def red_state(fr: torch.Tensor):
+    c = fr.to(torch.float32) / 255.0
+    lin = torch.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4).to(torch.float64)
+    b, g, r = lin[..., 0], lin[..., 1], lin[..., 2]
+    total = r + g + b
+    sat = (total > 0) & (r >= RED_SAT_RATIO * total) & (r - g - b >= RED_MIN_EXCESS)
+    M = _XYZ.to(fr.device)
+    x = M[0, 0] * r + M[0, 1] * g + M[0, 2] * b
+    y = M[1, 0] * r + M[1, 1] * g + M[1, 2] * b
+    z = M[2, 0] * r + M[2, 1] * g + M[2, 2] * b
+    d = x + 15.0 * y + 3.0 * z
+    ok = (d > 0) & (y >= RED_BLACK_Y)
+    dd = torch.where(ok, d, torch.ones_like(d))
+    u = torch.where(ok, 4.0 * x / dd, torch.full_like(d, D65_UV[0])).to(torch.float32)
+    v = torch.where(ok, 9.0 * y / dd, torch.full_like(d, D65_UV[1])).to(torch.float32)
+    return sat, u, v
+
+
+@torch.no_grad()
+def red_transitions(frames: torch.Tensor):
+    T = frames.shape[0]
+    ps, pu, pv = red_state(frames[0])
+    shape = ps.shape
+    event = torch.zeros((T,) + shape, dtype=torch.bool, device=frames.device)
+    qual = torch.zeros((T,) + shape, dtype=torch.int8, device=frames.device)
+    duv_at = torch.zeros((T,) + shape, dtype=torch.float32, device=frames.device)
+    one = torch.ones(shape, dtype=torch.int8, device=frames.device); zero = torch.zeros_like(one)
+    for t in range(1, T):
+        s, u, v = red_state(frames[t])
+        duv = torch.hypot(u - pu, v - pv)
+        nd = torch.where(s & ~ps, one, torch.where(~s & ps, -one, zero))
+        event[t] = (duv >= RED_CHANGE_EPS) | (nd != 0)
+        qual[t] = torch.where((duv > RED_DELTA_UV) & (nd != 0), nd, zero)
+        duv_at[t] = duv
+        ps, pu, pv = s, u, v
+    k = torch.cumsum(event.to(torch.int32), 0)
+    tix = torch.arange(T, device=frames.device, dtype=torch.int32).view((T,) + (1,) * len(shape)).expand((T,) + shape)
+    ev_t = torch.where(event, tix, torch.full_like(tix, -1))
+    prev_ev = torch.cummax(ev_t, 0).values
+    prev_ev = torch.cat([torch.full((1,) + shape, -1, dtype=torch.int32, device=frames.device), prev_ev[:-1]])
+    ev_rev = torch.where(event, tix, torch.full_like(tix, T)).flip(0)
+    next_ev = torch.cummin(ev_rev, 0).values.flip(0)
+    next_ev = torch.cat([next_ev[1:], torch.full((1,) + shape, T, dtype=torch.int32, device=frames.device)])
+    q_pad = torch.cat([qual, torch.zeros((1,) + shape, dtype=torch.int8, device=frames.device)])
+    first = (k % 2 == 1)
+    partner = torch.where(first, next_ev, prev_ev)
+    idx = torch.where((partner >= 0) & (partner <= T), partner, torch.full_like(partner, T)).long()
+    partner_q = torch.gather(q_pad, 0, idx)
+    unpaired_last = first & (next_ev >= T)
+    valid = event & (qual != 0) & (((partner_q == -qual) & (partner >= 0)) | unpaired_last)
+    out = torch.where(valid, qual, torch.zeros_like(qual))
+    max_duv = float(duv_at[valid].max()) if bool(valid.any()) else 0.0
+    return out, max_duv
+
+
+@torch.no_grad()
+def judge_red(frames_bgr: np.ndarray, fps: float, device: str = "cuda", grid_cols: int = 32) -> dict:
+    x = torch.from_numpy(np.ascontiguousarray(frames_bgr)).to(device)
+    signed, max_duv = red_transitions(x)
+    return _judge_from_signed(signed, fps, grid_cols, CLAUSE_F2, extra={"max_delta_uv": round(max_duv, 3)})
+
+
+@torch.no_grad()
+def _judge_from_signed(signed: torch.Tensor, fps: float, grid_cols: int, clause: str, extra: dict | None = None) -> dict:
+    c = concurrency_frames(fps)
+    e, a_up, a_dn = screen_transitions(signed, c)
+    counts = window_counts(e, fps)
+    w = window_frames(fps)
+    starts = np.flatnonzero(counts >= 2 * MAX_FLASHES + 1)
+    hazard_frames = np.zeros(len(e), bool)
+    for s in starts:
+        hazard_frames[s:s + w] = True
+    hazard_mask = torch.zeros(signed.shape[1:], dtype=torch.bool, device=signed.device)
+    for t in np.flatnonzero((e != 0) & hazard_frames):
+        hazard_mask |= (signed[max(0, t - c + 1):t + 1] == int(e[t])).any(0)
+    flashes = float(counts.max()) / 2.0 if len(counts) else 0.0
+    H, W = signed.shape[1:]
+    gr, gc = grid_shape(H, W, grid_cols)
+    cell = torch.nn.functional.adaptive_avg_pool2d(hazard_mask.float()[None, None], (gr, gc))[0, 0].cpu().numpy()
+    segs = []
+    if starts.size:
+        fr = np.flatnonzero(hazard_frames)
+        br = np.flatnonzero(np.diff(fr) > 1)
+        for a_, b_ in zip(np.r_[fr[0], fr[br + 1]], np.r_[fr[br], fr[-1]]):
+            segs.append({"start_s": round(float(a_) / fps, 2), "end_s": round(float(b_ + 1) / fps, 2),
+                         "max_flashes_per_s": float(counts[a_:b_ + 1].max()) / 2.0})
+    ev = {"clause": clause, "segments": segs,
+          "peak_area_pct": round(100 * float(np.maximum(a_up, a_dn).max()), 1) if len(a_up) else 0.0,
+          "hazard_area_pct": round(100 * float(hazard_mask.float().mean()), 1),
+          "cells": [[int(r), int(q)] for r, q in zip(*np.nonzero(cell > 0.1))], "grid_shape": [gr, gc]}
+    ev.update(extra or {})
+    return {"dangerous": flashes > MAX_FLASHES, "max_flashes": flashes, "transitions": e, "area_up": a_up, "area_down": a_dn,
+            "hazard_frames": hazard_frames, "hazard_mask": hazard_mask.cpu().numpy(), "grid": cell, "evidence": ev}
