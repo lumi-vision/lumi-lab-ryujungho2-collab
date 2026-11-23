@@ -53,7 +53,10 @@ def limit_cpu(mask: int = 0x00FF) -> None:
     cv2.setNumThreads(n)
 
 
-limit_cpu()
+# 2026-11-23 20:40 사용자: 제한 풀고 GPU 로 — 기본은 제한 없음, LUMI_CPU_LIMIT=1 일 때만 제한
+import os as _os  # noqa: E402
+if _os.environ.get("LUMI_CPU_LIMIT") == "1":
+    limit_cpu()
 from lumi_synth import hazard7, quality  # noqa: E402
 from lumi_synth.corrnet import CorrNet, lin_to_srgb, srgb_to_lin  # noqa: E402
 from make_hazard7_dataset import FPS, H, W, decode, encode, ours_judge  # noqa: E402
@@ -383,6 +386,7 @@ def main_real(a) -> None:
             lab0 = sorted(tj0["labels"])
             xl = LUT[x]
             dl0 = float(np.abs(np.diff(xl.mean(-1), axis=0)).mean())
+            pend = []
             for m in todo:
                 t0 = time.time()
                 try:
@@ -403,29 +407,57 @@ def main_real(a) -> None:
                         y = model_correct_long(m, x)
                     sec = time.time() - t0
                     n = min(len(x), len(y)); y = y[:n]
-                    if m in a.save_models:                         # 육안 확인용(사용자가 본다). 원본 해상도·fps
+                    saved = None
+                    if m in a.save_models:                         # 육안 확인용(사용자가 본다). 원본 해상도·fps — 인코딩은 스레드에서
                         od = ROOT / "data" / "correction" / "kaya_out" / m
                         od.mkdir(parents=True, exist_ok=True)
-                        encode_any(y, od / f"{p.stem}.mp4", fps)
+                        saved = POOL.submit(encode_any, y, od / f"{p.stem}.mp4", fps)
+                    fut = POOL.submit(ours_judge_fps, y, fps)      # CPU 판정은 스레드에서 GPU 작업과 겹쳐 돌림(결과 동일)
                     tj = team_judge(y, a.team_dir)
-                    oj = ours_judge_fps(y, fps)
                     lp = quality.lpips_map(y[:n:8], x[:n:8])
-                    ev = np.ones(y.shape[:3], bool)
+                    yt, se = gpu_lin_mean_and_mse(y, x[:n])
                     row = {"file": p.name, "method": m, "fps": round(fps, 2), "frames": n, "labels_before": lab0,
                            "labels_after": sorted(tj["labels"]),
                            "flash_labels_after": sorted(l for l in tj["labels"] if l != "정적 공간 패턴"),
                            "safe_team": not tj["labels"], "safe_team_flash": not [l for l in tj["labels"] if l != "정적 공간 패턴"],
-                           "safe_ours": not (oj["lum"] or oj["red"] or oj["ext_lum"] or oj["ext_red"]),
-                           "lpips_vs_input": round(float(lp.mean()), 4), "psnr_vs_input": round(quality.psnr(y, x[:n], ev), 3),
-                           "flicker_ratio": round(float(np.abs(np.diff(LUT[y].mean(-1), axis=0)).mean()) / max(dl0, 1e-6), 4),
+                           "lpips_vs_input": round(float(lp.mean()), 4),
+                           "psnr_vs_input": round(float("inf") if se == 0 else float(10 * np.log10(255.0 ** 2 / se)), 3),
+                           "flicker_ratio": round(float((yt[1:] - yt[:-1]).abs().mean()) / max(dl0, 1e-6), 4),
                            "sec": round(sec, 2)}
+                    del yt
+                    torch.cuda.empty_cache()
+                    pend.append((row, fut, saved))
                 except Exception as e:  # noqa: BLE001
                     import traceback
-                    row = {"file": p.name, "method": m, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]}
+                    pend.append(({"file": p.name, "method": m, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]}, None, None))
+                y = None
+                while sum(1 for _, q, _s in pend if q is not None and not q.done()) > POOL_DEPTH:
+                    time.sleep(0.2)
+            for row, fut, saved in pend:
+                try:
+                    if saved is not None:
+                        saved.result()
+                    if fut is not None:
+                        oj = fut.result()
+                        row["safe_ours"] = not (oj["lum"] or oj["red"] or oj["ext_lum"] or oj["ext_red"])
+                except Exception as e:  # noqa: BLE001
+                    row = {"file": row["file"], "method": row["method"], "error": f"ours_judge/save {type(e).__name__}: {e}"}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
             print(f"  {i}/{len(files)} {p.name}", flush=True)
     if a.sk == 1:
         report_real(out_rows, ROOT / "checks" / "correction" / f"eval_kaya_{tag}.md", methods)
+
+
+def gpu_lin_mean_and_mse(y: np.ndarray, x: np.ndarray, chunk: int = 128):
+    """(프레임별 선형 밝기 평균 [T] GPU 텐서, 입력 대비 MSE) — numpy 판과 같은 값, 긴 영상은 조각으로."""
+    lut = torch.as_tensor(LUT, device="cuda")
+    means, sse, cnt = [], 0.0, 0
+    for s in range(0, len(y), chunk):
+        yc = torch.from_numpy(np.ascontiguousarray(y[s:s + chunk])).cuda()
+        xc = torch.from_numpy(np.ascontiguousarray(x[s:s + chunk])).cuda()
+        means.append(lut[yc.long()].mean(-1))
+        sse += float(((yc.float() - xc.float()) ** 2).sum()); cnt += yc.numel()
+    return torch.cat(means), sse / max(cnt, 1)
 
 
 def encode_any(x: np.ndarray, path: Path, fps: float) -> None:
