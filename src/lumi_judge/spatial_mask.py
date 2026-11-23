@@ -1916,6 +1916,15 @@ class PartialStaticPatternDetector(StaticPatternDetector):
                 break
             pat_mask |= extra_mask
 
+        if getattr(self.mask_config, "pattern_area_from_mask", False):
+            # 판정기 v2: 규격대로 '패턴이 차지한 면적' 으로 판정 (원본은 화면 전체 국소 대비 면적 fine_area 를 씀)
+            mask_area = float(pat_mask.float().mean().item())
+            if mask_area <= self.pse.pattern_area_min:
+                res = (False, mask_area, best_pairs, best_cpd)
+                pat_mask = torch.zeros_like(lum, dtype=torch.bool)
+            else:
+                res = (True, mask_area, best_pairs, best_cpd)
+
         self._prev_lum = lum.clone()
         self._prev_result = res
         self._prev_mask = pat_mask

@@ -38,6 +38,8 @@ def configs():
         "fft06": (m0, rep(p0, pattern_fft_energy_ratio_min=0.6)),
         "no_gabor_fft06": (rep(m0, enable_gabor_fallback=False), rep(p0, pattern_fft_energy_ratio_min=0.6)),
         "enhanced": (rep(m0, enhanced_spatial_pattern=True), p0),
+        "maskarea": (rep(m0, pattern_area_from_mask=True), p0),
+        "enh_maskarea": (rep(m0, enhanced_spatial_pattern=True, pattern_area_from_mask=True), p0),
     }
 
 
