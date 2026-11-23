@@ -39,3 +39,4 @@ ITC 2001 / Ofcom Annex 1 / BT.1702-3 Attachment 1(informative):
 
 ## 8. 변경 기록
 - 2026-11-23 문서 작성 · 팀원 Partial B2 복사(`src/lumi_judge`, 495460d) · pse-test-media 에 줄무늬 시험이 없음을 확인(참고 문서 정정).
+- 2026-11-23 GPU 1 단계: 프로파일 결과 192 프레임 클립 17.1 s 중 1D 단면 히스테리시스(`extract_hysteresis_extrema_1d`, 59,899 회)·줄무늬 구간 탐색·legacy 세그먼트 마스크가 대부분(파이썬 반복). `src/lumi_judge/gpu_profiles.py` 에 단면 일괄 GPU 판 작성 — **원본과 완전히 같은 결과**(무작위 단면 3,000 · 실제 단면 12,512 에서 불일치 0, `scripts/judge_v2_parity.py`). 단, 길이 방향 순차 반복(작은 커널 수백 개) 때문에 아직 원본보다 느림(실제 단면 1.78 s vs 1.03 s) → 다음: 국소 극값 압축 후 반복, 단면당 GPU 스레드 1 개 커널(CuPy/NVRTC), 프레임 묶음 처리.
