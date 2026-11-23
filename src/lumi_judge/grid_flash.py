@@ -1,0 +1,175 @@
+"""격자 판정기 G — 휘도 깜빡임(F1): 픽셀에서 규격대로 재고, 격자로 판단·설명한다 (docs/GRID_JUDGE_DESIGN.md §2–§4).
+
+측정은 `lumi_synth.measure` 의 휘도 깜빡임 판정(ITU-R BT.1702-3, 설계 결정 D1–D4, pse-test-media 검증)을
+**같은 정의로 GPU(PyTorch)로 옮긴 것**이다. 동일성: `scripts/grid_judge_parity.py`.
+그 위에 격자 요약과 근거 출력을 더한다:
+  - 격자 32×18(화면 비율 기준, docs §1). 칸 값 = 그 칸에서 위험 창의 화면 전이에 참여한 픽셀 비율.
+  - 근거: 위험 구간(초), 그 구간의 1 초 최대 깜빡임 수, 화면 전이 순간의 방향별 면적(%), 전이 픽셀의 밝기 변화(cd/m²) 중앙값,
+    조항 이름, 칸 목록.
+"""
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import torch
+
+WHITE_CD, DELTA_CD, DARK_LIMIT_CD, AREA_LIMIT, MAX_FLASHES = 200.0, 20.0, 160.0, 0.25, 3
+D3_SYNC_MS = 20.0
+CLAUSE_F1 = "ITU-R BT.1702-3 Annex 1 Guideline 1 (일반 깜빡임: 20 cd/m², 어두운 쪽 < 160 cd/m², 면적 > 25 %, 1 초 > 3 회)"
+
+
+def concurrency_frames(fps: float) -> int:
+    return max(1, int(math.floor(D3_SYNC_MS / 1000.0 * fps + 1e-9)) + 1)
+
+
+def window_frames(fps: float) -> int:
+    return max(1, int(math.ceil(fps - 1e-9)))
+
+
+@torch.no_grad()
+def luminance_cd(frames_bgr: torch.Tensor) -> torch.Tensor:
+    """uint8 BGR [T,H,W,3] (GPU) → cd/m² float32 [T,H,W] (measure.luminance_cd 와 같은 식)."""
+    c = frames_bgr.to(torch.float32) / 255.0
+    lin = torch.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    return WHITE_CD * (0.2126 * lin[..., 2] + 0.7152 * lin[..., 1] + 0.0722 * lin[..., 0])
+
+
+@torch.no_grad()
+def pixel_transitions(lum: torch.Tensor) -> torch.Tensor:
+    """measure.pixel_transitions 의 GPU 판 — 픽셀은 병렬, 시간만 순차. int8 [T,H,W]."""
+    ref = lum[0].clone(); lo = lum[0].clone(); hi = lum[0].clone()
+    direction = torch.zeros(lum.shape[1:], dtype=torch.int8, device=lum.device)
+    out = torch.zeros(lum.shape, dtype=torch.int8, device=lum.device)
+    one = torch.ones_like(direction); m1 = -one; zero = torch.zeros_like(direction)
+    for t in range(1, lum.shape[0]):
+        v = lum[t]
+        unknown = direction == 0
+        extend = ((direction == 1) & (v > ref)) | ((direction == -1) & (v < ref))
+        ref = torch.where(extend, v, ref)
+        diff = v - ref
+        big = (diff.abs() >= DELTA_CD) & (torch.minimum(v, ref) < DARK_LIMIT_CD) & ~extend & ~unknown
+        new_dir = torch.sign(diff).to(torch.int8)
+        up_mag, dn_mag = v - lo, hi - v
+        up = unknown & (up_mag >= DELTA_CD) & (lo < DARK_LIMIT_CD)
+        dn = unknown & (dn_mag >= DELTA_CD) & (v < DARK_LIMIT_CD)
+        first = torch.where(up & dn, torch.where(up_mag >= dn_mag, one, m1), torch.where(up, one, torch.where(dn, m1, zero)))
+        new_dir = torch.where(unknown, first, new_dir)
+        big = big | (first != 0)
+        trans = big & (new_dir != direction)
+        out[t] = torch.where(trans, new_dir, zero)
+        direction = torch.where(trans, new_dir, direction)
+        ref = torch.where(big, v, ref)
+        lo = torch.minimum(lo, v); hi = torch.maximum(hi, v)
+    return out
+
+
+@torch.no_grad()
+def screen_transitions(signed: torch.Tensor, c: int):
+    """measure.directional_areas + screen_transitions(c 소비 규칙 포함)의 GPU 판 → (e int8[T] numpy, a_up, a_dn, used_area dict)."""
+    T = signed.shape[0]
+    n_px = float(signed[0].numel())
+    up_f = (signed == 1); dn_f = (signed == -1)
+    # 이동 창 합집합 면적 (A↑, A↓)
+    cu = torch.cumsum(up_f.to(torch.int16), 0); cd = torch.cumsum(dn_f.to(torch.int16), 0)
+    a_up = np.zeros(T); a_dn = np.zeros(T)
+    never = -(2 ** 30)
+    last_up = torch.full(signed.shape[1:], never, dtype=torch.int32, device=signed.device)
+    last_dn = last_up.clone()
+    used_up = used_dn = never
+    e = np.zeros(T, dtype=np.int8)
+    state = 0
+    up_any = up_f.flatten(1).any(1).cpu().numpy(); dn_any = dn_f.flatten(1).any(1).cpu().numpy()
+    for t in range(T):
+        prev_u = cu[t - c] if t - c >= 0 else 0
+        prev_d = cd[t - c] if t - c >= 0 else 0
+        a_up[t] = float(((cu[t] - prev_u) > 0).sum()) / n_px
+        a_dn[t] = float(((cd[t] - prev_d) > 0).sum()) / n_px
+        last_up = torch.where(up_f[t], torch.full_like(last_up, t), last_up)
+        last_dn = torch.where(dn_f[t], torch.full_like(last_dn, t), last_dn)
+        area_up = float((last_up > max(t - c, used_up)).sum()) / n_px
+        area_dn = float((last_dn > max(t - c, used_dn)).sum()) / n_px
+        up = area_up > AREA_LIMIT and bool(up_any[t])
+        dn = area_dn > AREA_LIMIT and bool(dn_any[t])
+        if up and dn:
+            d = -state if state != 0 else (1 if a_up[t] >= a_dn[t] else -1)
+        elif up:
+            d = 1
+        elif dn:
+            d = -1
+        else:
+            continue
+        if d != state:
+            e[t] = d; state = d
+            if d == 1 or (up and dn):
+                used_up = t
+            if d == -1 or (up and dn):
+                used_dn = t
+    return e, a_up, a_dn
+
+
+def window_counts(e: np.ndarray, fps: float) -> np.ndarray:
+    w = window_frames(fps)
+    csum = np.concatenate([[0], np.cumsum(e != 0)])
+    n = len(e)
+    return csum[np.minimum(np.arange(n) + w, n)] - csum[:n]
+
+
+def grid_shape(h: int, w: int, cols: int = 32) -> tuple[int, int]:
+    rows = max(1, int(round(cols * h / w)))
+    return rows, cols
+
+
+@torch.no_grad()
+def judge_luminance(frames_bgr: np.ndarray, fps: float, device: str = "cuda", grid_cols: int = 32) -> dict:
+    """F1 판정 + 근거. frames_bgr uint8 [T,H,W,3] numpy."""
+    x = torch.from_numpy(np.ascontiguousarray(frames_bgr)).to(device)
+    lum = luminance_cd(x)
+    signed = pixel_transitions(lum)
+    c = concurrency_frames(fps)
+    e, a_up, a_dn = screen_transitions(signed, c)
+    counts = window_counts(e, fps)
+    w = window_frames(fps)
+    starts = np.flatnonzero(counts >= 2 * MAX_FLASHES + 1)
+    hazard_frames = np.zeros(len(e), bool)
+    for s in starts:
+        hazard_frames[s:s + w] = True
+    hz_t = np.flatnonzero((e != 0) & hazard_frames)
+    hazard_mask = torch.zeros(signed.shape[1:], dtype=torch.bool, device=device)
+    dl_vals = []
+    for t in hz_t:
+        lo_i = max(0, t - c + 1)
+        part = (signed[lo_i:t + 1] == int(e[t])).any(0)
+        hazard_mask |= part
+        if t >= 1:
+            d = (lum[t] - lum[max(0, t - 1)]).abs()[part]
+            if d.numel():
+                dl_vals.append(float(d.median()))
+    flashes = float(counts.max()) / 2.0 if len(counts) else 0.0
+    H, W = signed.shape[1:]
+    gr, gc = grid_shape(H, W, grid_cols)
+    cell = torch.nn.functional.adaptive_avg_pool2d(hazard_mask.float()[None, None], (gr, gc))[0, 0].cpu().numpy()
+    segs = []
+    if starts.size:
+        fr = np.flatnonzero(hazard_frames)
+        br = np.flatnonzero(np.diff(fr) > 1)
+        for a_, b_ in zip(np.r_[fr[0], fr[br + 1]], np.r_[fr[br], fr[-1]]):
+            segs.append({"start_s": round(a_ / fps, 2), "end_s": round((b_ + 1) / fps, 2),
+                         "max_flashes_per_s": float(counts[a_:b_ + 1].max()) / 2.0})
+    return {
+        "dangerous": flashes > MAX_FLASHES,
+        "max_flashes": flashes,
+        "transitions": e, "area_up": a_up, "area_down": a_dn,
+        "hazard_frames": hazard_frames,
+        "hazard_mask": hazard_mask.cpu().numpy(),
+        "grid": cell,
+        "evidence": {
+            "clause": CLAUSE_F1,
+            "segments": segs,
+            "peak_area_pct": round(100 * float(np.maximum(a_up, a_dn).max()), 1) if len(a_up) else 0.0,
+            "hazard_area_pct": round(100 * float(hazard_mask.float().mean()), 1),
+            "delta_cd_m2_median": round(float(np.median(dl_vals)), 1) if dl_vals else None,
+            "cells": [[int(r), int(q)] for r, q in zip(*np.nonzero(cell > 0.1))],
+            "grid_shape": [gr, gc],
+        },
+    }
