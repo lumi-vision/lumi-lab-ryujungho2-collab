@@ -428,6 +428,7 @@ def main_real(a) -> None:
                     del yt
                     torch.cuda.empty_cache()
                     pend.append((row, fut, saved))
+                    print(f"    {p.name} {m} {sec:.1f}s", flush=True)   # 긴 영상에서 멈춤 감시가 오판하지 않게 방법마다 출력
                 except Exception as e:  # noqa: BLE001
                     import traceback
                     pend.append(({"file": p.name, "method": m, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-800:]}, None, None))
