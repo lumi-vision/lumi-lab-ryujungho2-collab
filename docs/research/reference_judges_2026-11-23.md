@@ -30,8 +30,8 @@
 
 | 질문 | 기준 | 자료 |
 |---|---|---|
-| 규격을 정확히 구현했나 | 정답이 규격에서 나오는 시험 영상 | pse-test-media(TRACE RERC, Jordan 2025 의 적합성 평가 방법), hazard7 hazard/near 경계 쌍 |
+| 규격을 정확히 구현했나 | 정답이 규격에서 나오는 시험 영상 | 깜빡임: pse-test-media(TRACE RERC, Jordan 2025) · **패턴: pse-test-media 에 정지 줄무늬 시험이 없음(면적 패턴은 깜빡임 면적용)** → 표준 조건으로 직접 만든 경계 시험 세트 + hazard7 hazard/near 쌍 |
 | 독립 구현과 일치하나 | 자동화 가능한 오픈소스 판정 도구 | **EA IRIS**(BSD-3, 기존에 사용 — `DATA_SOURCES.md` §4), PEAT 는 웹·합성 소량 확인만 |
 | 실제 위험·일상 영상에서 | 위험 = **외부 경고가 붙은 공개 영상**(Kaya 와 같은 선정 기준) · 일상 = South 안전 | Kaya 22 (+ 같은 기준으로 확장 시 저작권상 내부 분석만) · South 1,837 |
 
-패턴은 PEAT·IRIS 모두 다루지 않으므로 pse-test-media 의 공간 패턴 시험과 사람 확인이 기준이다.
+패턴은 PEAT·IRIS 모두 다루지 않고 pse-test-media 에도 줄무늬 시험이 없다(11-23 정정) → 표준 조건(ITC/Ofcom·BT.1702-3 Att.1)으로 직접 만든 경계 시험 세트와 사람 확인이 기준이다.
