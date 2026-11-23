@@ -49,24 +49,42 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--team-dir", required=True)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--variant", default="orig", choices=("orig", "maskarea", "enh_maskarea"),
+                    help="orig = 팀원 원본 / maskarea·enh_maskarea = 판정기 v2(src/lumi_judge) 패턴 면적 수정판")
+    ap.add_argument("--subset", default="", help="이 rows.jsonl 의 파일 중 패턴 판정 또는 사람 패턴 라벨인 것만(재판정용)")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     sys.path.insert(0, str(ROOT / "src"))
     from lumi_judge.cpu_limit import limit_cpu
     limit_cpu()
-    sys.path.insert(0, str(Path(a.team_dir) / "Partial" / "B2"))
-    import vdcoreps as vd
+    if a.variant == "orig":
+        sys.path.insert(0, str(Path(a.team_dir) / "Partial" / "B2"))
+        import vdcoreps as vd
+        kw = {}
+    else:
+        import dataclasses
+        import lumi_judge as vd
+        kw = {"mask_config": dataclasses.replace(vd.PartialMaskConfig(), pattern_area_from_mask=True,
+                                                 enhanced_spatial_pattern=(a.variant == "enh_maskarea"))}
     from eval_real_hazards import decode as dec_any
 
     src = ROOT / "data" / "real" / "south2021"
     lab = {r["label"]: r for r in csv.DictReader(open(src / "social-media-study.csv", encoding="utf-8", errors="ignore"))}
     files = {p.stem: p for p in (src / "social-media-study-gifs").iterdir() if p.suffix.lower() in (".mp4", ".gif")}
-    out = ROOT / "data" / "judge" / "south_partial"
+    out = ROOT / "data" / "judge" / ("south_partial" if a.variant == "orig" else f"south_{a.variant}")
     (out / "frames").mkdir(parents=True, exist_ok=True)
     (out / "metrics").mkdir(parents=True, exist_ok=True)
     rows_p = out / "rows.jsonl"
     done = {json.loads(l)["label"] for l in rows_p.read_text(encoding="utf-8").splitlines() if l.strip()} if rows_p.exists() else set()
-    todo = [k for k in sorted(lab) if k in files and k not in done][: a.limit or None]
+    keep = None
+    if a.subset:
+        keep = set()
+        for l in Path(a.subset).read_text(encoding="utf-8").splitlines():
+            if l.strip():
+                r0 = json.loads(l)
+                if "error" not in r0 and ("정적 공간 패턴" in r0["labels"] or r0["human"]["pattern"] == "pattern"):
+                    keep.add(r0["label"])
+    todo = [k for k in sorted(lab) if k in files and k not in done and (keep is None or k in keep)][: a.limit or None]
     missing = [k for k in lab if k not in files]
     print(f"South {len(lab)} · 파일 없음 {len(missing)} · 끝남 {len(done)} · 할 것 {len(todo)}", flush=True)
     t_all = time.time()
@@ -75,7 +93,7 @@ def main():
             t0 = time.time()
             try:
                 x, fps = dec_any(files[k])
-                res = vd.analyze_frames(list(x), fps, device="cuda")
+                res = vd.analyze_frames(list(x), fps, device="cuda", **kw)
                 masks = np.stack([np.asarray(res.frame_masks.get(l, np.zeros(len(x), bool)), bool) for l in LABELS])
                 np.savez_compressed(out / "frames" / f"{k}.npz", masks=masks, labels=np.array(LABELS))
                 try:
@@ -88,7 +106,7 @@ def main():
                        "intervals_by_label": jsonable(getattr(res, "intervals_by_label", {})),
                        "active_mask_area": jsonable(getattr(res, "active_mask_area", None)),
                        "human": {c: lab[k][c] for c in ("dangerous", "flash", "red", "pattern", "source")},
-                       "judge": "Partial/B2 vdcoreps Update11 495460d", "sec": round(time.time() - t0, 2)}
+                       "judge": "Partial/B2 vdcoreps Update11 495460d" + ("" if a.variant == "orig" else f" + lumi_judge v2 {a.variant}"), "sec": round(time.time() - t0, 2)}
             except Exception as e:  # noqa: BLE001
                 import traceback
                 row = {"label": k, "file": files[k].name, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-600:],
