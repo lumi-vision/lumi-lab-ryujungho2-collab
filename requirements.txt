@@ -11,3 +11,4 @@ psutil>=5.9
 faiss-cpu==1.16.0
 scikit-learn>=1.9
 ipykernel
+cupy-cuda13x[ctk]>=14.2  # 판정기 v2 GPU 커널(src/lumi_judge/gpu_kernel.py)

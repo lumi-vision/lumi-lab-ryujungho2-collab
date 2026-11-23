@@ -69,16 +69,44 @@ def compare(profiles, pse, dev="cuda"):
     return bad_ext, bad_run, t_gpu, t_cpu
 
 
+def compare_kernel(profiles, pse):
+    """CUDA 커널판(gpu_kernel.hyst_runs) 대조 — band·wedge 쌍 수와 band cpd."""
+    import cupy as cp
+    from lumi_judge.gpu_kernel import hyst_runs
+    h = pse.pattern_hysteresis_cd_m2
+    N = len(profiles); L = max(len(v) for v, _ in profiles)
+    V = np.zeros((N, L)); T = np.zeros((N, L)); lens = np.array([len(v) for v, _ in profiles])
+    for i, (v, t) in enumerate(profiles):
+        V[i, :len(v)] = v; T[i, :len(t)] = t
+    hyst_runs(V[:2], T[:2], lens[:2], pse)            # 컴파일 예열
+    cp.cuda.Device().synchronize(); t0 = time.time()
+    P, C, P2, NE, ET, EV = hyst_runs(V, T, lens, pse)
+    cp.cuda.Device().synchronize(); tg = time.time() - t0
+    P, C, P2, NE, ET, EV = (cp.asnumpy(z) for z in (P, C, P2, NE, ET, EV))
+    t0 = time.time(); bad = 0
+    for i, (v, t) in enumerate(profiles):
+        bp, bc, wp = S.evaluate_1d_open_dual(v, t, pse)
+        rt, rv = S.extract_hysteresis_extrema_1d(v, t, h)
+        n = int(NE[i])
+        if n != len(rv) or not (np.allclose(ET[i, :n], rt) and np.allclose(EV[i, :n], rv)) or int(P[i]) != bp or int(P2[i]) != wp or not np.isclose(C[i], bc):
+            bad += 1
+    return bad, tg, time.time() - t0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=5000)
     ap.add_argument("--clip", default="")
+    ap.add_argument("--kernel", action="store_true", help="CUDA 커널판(CuPy)도 대조")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     pse = PSEConfig()
     prof = random_profiles(a.n, np.random.default_rng(0))
     be, br, tg, tc = compare(prof, pse)
     print(f"무작위 {len(prof)}: 극값 불일치 {be} · 최장 구간 불일치 {br} · GPU {tg:.2f}s vs 원본 {tc:.2f}s")
+    if a.kernel:
+        bk, tg, tc = compare_kernel(prof, pse)
+        print(f"  커널: 불일치 {bk} · 커널 {tg*1000:.1f}ms vs 원본 {tc:.2f}s")
     if a.clip:
         import lumi_judge as J
         from make_hazard7_dataset import FPS, decode
@@ -95,6 +123,9 @@ def main():
         S.extract_hysteresis_extrema_1d = orig
         be, br, tg, tc = compare(caught, pse)
         print(f"실제 단면 {len(caught)} ({a.clip}): 극값 불일치 {be} · 최장 구간 불일치 {br} · GPU {tg:.2f}s vs 원본 {tc:.2f}s")
+        if a.kernel:
+            bk, tg, tc = compare_kernel(caught, pse)
+            print(f"  커널: 불일치 {bk} · 커널 {tg*1000:.1f}ms vs 원본 {tc:.2f}s")
 
 
 if __name__ == "__main__":
