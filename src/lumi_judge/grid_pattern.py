@@ -28,7 +28,10 @@ N_THETA, N_FREQ = 12, 8
 CPD_LO, CPD_HI = 1.0, 10.0
 CAND_FRAC = 0.6               # 후보 문턱 = 0.6 × 20 cd/m² (구현 선택: 필터 진폭은 파형에 따라 과소추정 → 확인은 4 단계에서 정확히)
 CELL_MIN_FRAC = 0.30          # 칸이 '줄무늬 칸'이 되는 후보 픽셀 비율 (구현 선택)
-LINK_FREQ_RATIO, LINK_DTHETA = 1.5, 20.0   # 이웃 칸 연결 조건 (구현 선택)
+LINK_FREQ_RATIO, LINK_DTHETA = 1.5, 30.0   # 이웃 칸 연결 조건 (구현 선택; 30° = 큰 굴곡의 물결무늬도 한 영역으로 — 2026-11-24 진단)
+LOCAL_REG_MAX = 0.25         # 규칙성: 이웃한 한 주기 폭끼리의 상대 변화 |Δp|/p 의 중앙값 상한 — '명확히 식별되는 (규칙) 줄무늬'(원문)의 구현.
+                             # 서서히 변하는 처프·원근 줄무늬는 통과, 간격이 제각각인 자연 질감은 탈락 (구현 선택; 팀원 판 전체 CV ≤ 0.35 와 다른 '국소' 정의)
+TRACE_STEP = 0.25            # 경로 표본 간격(px): 1 px 이면 7 cpd 줄의 반 주기(≈1.6 px)가 1·2 px 로 잘려 cpd > 10 으로 오판 → 쌍이 끊김
 COHERENCE_2D = 0.5            # 칸 안 방향 일관성(|평균 e^{i2θ}|)이 이보다 낮으면 2 차원 반복 무늬(체커·점 열) → 방향 대신 주파수로만 연결 (구현 선택)
 HALF_AMP = 0.5                # 패턴 경계 = 영역 핵심 진폭의 절반(대칭 필터의 계단 응답이 실제 경계에서 50 %) — 면적은 이 경계 안의 픽셀
 AREA_MIN, MIN_PAIRS = 0.40, 6
@@ -82,6 +85,32 @@ class PatternBank:
         return k, amp, th, cp
 
 
+def _best_run_regularity(et, ev, n, pse):
+    """한 단면의 최장 유효 구간(원본 _best_open_run 과 같은 규칙)에서 이웃 한 주기 폭의 상대 변화 중앙값."""
+    if n < 4:
+        return 1.0
+    et, ev = et[:n], ev[:n]
+    lo, hi = np.minimum(ev[:-1], ev[1:]), np.maximum(ev[:-1], ev[1:])
+    dl = hi - lo
+    ok = np.where(lo < pse.dark_lum_limit_cd_m2, dl >= pse.delta_lum_min_cd_m2, (dl / np.maximum(hi + lo, 1e-6)) > pse.bright_michelson_min)
+    dth = np.diff(et)
+    cpd = np.where(dth > 1e-6, 0.5 / np.maximum(dth, 1e-6), 0.0)
+    valid = ok & (cpd >= pse.pattern_cpd_min) & (cpd <= pse.pattern_cpd_max)
+    best, cur, end = 0, 0, -1
+    for j, v in enumerate(valid):
+        cur = cur + 1 if v else 0
+        if cur > best:
+            best, end = cur, j
+    if best < 4:
+        return 1.0
+    s0 = end - best + 1
+    t_run = et[s0:end + 2]
+    per = t_run[2:] - t_run[:-2]                                               # 한 주기 = 극값 두 칸
+    if len(per) < 2:
+        return 1.0
+    return float(np.median(np.abs(np.diff(per)) / np.maximum(per[:-1], 1e-9)))
+
+
 def _cells(mask, th, cp, rows, cols):
     """칸별 후보 비율·주된 방향(2θ 원평균)·주파수(로그 평균)."""
     m = mask.float()
@@ -121,7 +150,7 @@ def _regions(on, th_c, f_c, coh=None):
 
 
 @torch.no_grad()
-def _trace_profiles(lum, th_px, inreg, seeds, ppd, step=1.0, max_len=4000):
+def _trace_profiles(lum, th_px, inreg, seeds, ppd, step=TRACE_STEP, max_len=16000):
     """씨앗마다 국소 법선(θ)을 따라 양쪽으로 경로를 그리며 밝기 단면(cd/m²)과 누적 거리(도)를 얻는다."""
     h, w = lum.shape
     L = lum.cpu().numpy(); TH = th_px.cpu().numpy(); IN = inreg
@@ -132,9 +161,11 @@ def _trace_profiles(lum, th_px, inreg, seeds, ppd, step=1.0, max_len=4000):
             y, x = float(y0), float(x0)
             pv = None
             pts = []
-            for _ in range(max_len):
+            for it in range(max_len):
                 yi, xi = int(round(y)), int(round(x))
                 if not (0 <= yi < h and 0 <= xi < w) or not IN[yi, xi]:
+                    break
+                if it * step > 30 and math.hypot(y - y0, x - x0) < 2.0:          # 닫힌 경로(동심원을 도는 경우): 한 바퀴에서 멈춤
                     break
                 a = math.radians(float(TH[yi, xi]))
                 d = np.array([math.sin(a), math.cos(a)])                     # (dy, dx): 파수 벡터 방향
@@ -177,7 +208,7 @@ class GridPatternJudge:
         self.ppd = pixels_per_degree(w, h)
 
     @torch.no_grad()
-    def frame(self, lum: torch.Tensor, pse=None, n_seeds: int = 6) -> dict:
+    def frame(self, lum: torch.Tensor, pse=None, n_seeds: int = 12) -> dict:
         from .config import PSEConfig
         pse = pse or PSEConfig()
         k, amp, th, cp = self.bank.respond(lum)
@@ -209,15 +240,17 @@ class GridPatternJudge:
             area = float(pat.mean())
             if area <= AREA_MIN:                                               # 면적 미달 영역은 확인 생략(판정 불변)
                 continue
-            a_r = np.where(pat, amp_np, 0)
-            flat = np.argsort(a_r.ravel())[::-1]
-            seeds, taken = [], []
-            for idx in flat[: 20000]:
-                y, x = divmod(int(idx), self.w)
-                if all(abs(y - ty) + abs(x - tx) > 0.15 * (self.h + self.w) for ty, tx in taken):
-                    seeds.append((y, x)); taken.append((y, x))
-                if len(seeds) >= n_seeds:
-                    break
+            # 씨앗 = 영역 칸 전체에서 고르게 뽑은 칸마다 그 칸의 줄무늬 픽셀 중 진폭 최대 점 (확인 비율이 면적의 치우치지 않은 추정이 되도록)
+            seeds = []
+            order = np.linspace(0, len(cells) - 1, min(n_seeds, len(cells))).round().astype(int)
+            for ci in order:
+                r, c = cells[ci]
+                y0_, y1_ = int(r * cell_h), int((r + 1) * cell_h); x0_, x1_ = int(c * cell_w), int((c + 1) * cell_w)
+                blk = np.where(pat[y0_:y1_, x0_:x1_], amp_np[y0_:y1_, x0_:x1_], -1)
+                if blk.max() <= 0:
+                    continue
+                yy_, xx_ = np.unravel_index(int(np.argmax(blk)), blk.shape)
+                seeds.append((y0_ + yy_, x0_ + xx_))
             profs = _trace_profiles(lum, th, pat, seeds, self.ppd)
             if not profs:
                 continue
@@ -225,13 +258,19 @@ class GridPatternJudge:
             V = np.zeros((len(profs), Lmax)); T = np.zeros((len(profs), Lmax)); lens = np.array([len(p[0]) for p in profs])
             for i, (v, t) in enumerate(profs):
                 V[i, :len(v)] = v; T[i, :len(t)] = t
-            P, C, _, _, _, _ = hyst_runs(V, T, lens, pse if self.hdr else _sdr(pse))
-            P = P.get(); C = C.get()
-            j = int(np.argmax(P))
-            pairs, cpd = int(P[j]), float(C[j])
+            pse_u = pse if self.hdr else _sdr(pse)
+            P, C, _, NE, ET, EV = hyst_runs(V, T, lens, pse_u)
+            P = P.get(); C = C.get(); NE = NE.get(); ET = ET.get(); EV = EV.get()
+            reg_ok = np.array([_best_run_regularity(ET[i], EV[i], int(NE[i]), pse_u) <= LOCAL_REG_MAX for i in range(len(P))])
+            Pq = np.where(reg_ok, P, 0)
+            j = int(np.argmax(Pq))
+            pairs, cpd = int(Pq[j]), float(C[j])
+            # 표본 확인 면적: 영역 곳곳의 씨앗 중 규격대로(쌍 > 5·규칙적) 확인된 비율만큼만 면적으로 인정 — 질감이 한두 곳에서 우연히 맞는 경우 차단
+            verified = float((Pq >= MIN_PAIRS).mean())
+            area = area * verified
             dth = np.std([th_c[r, c] for r, c in cells])
             kind = "직선" if dth < 10 else "곡선·방사"
-            if pairs >= MIN_PAIRS and area > best["area"]:
-                best = {"is_pat": True, "area": area, "pairs": pairs, "cpd": cpd, "kind": kind,
+            if pairs >= MIN_PAIRS and area > AREA_MIN and area > best["area"]:
+                best = {"is_pat": True, "area": area, "pairs": pairs, "cpd": cpd, "kind": kind, "verified_seeds": f"{int((Pq >= MIN_PAIRS).sum())}/{len(Pq)}",
                         "cells": [[int(r), int(c)] for r, c in cells]}
         return best
