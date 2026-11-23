@@ -64,6 +64,8 @@ def main():
     ap.add_argument("--n", type=int, default=40)
     ap.add_argument("--split", default="train")
     a = ap.parse_args()
+    from lumi_judge.cpu_limit import limit_cpu
+    limit_cpu()
     sys.stdout.reconfigure(encoding="utf-8")
     d, fp, tn, pos = pick(a.split, a.n)
     out = ROOT / "data" / "judge" / "pattern_diag_rows.jsonl"

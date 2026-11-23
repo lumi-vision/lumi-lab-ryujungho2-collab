@@ -51,6 +51,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
+    sys.path.insert(0, str(ROOT / "src"))
+    from lumi_judge.cpu_limit import limit_cpu
+    limit_cpu()
     sys.path.insert(0, str(Path(a.team_dir) / "Partial" / "B2"))
     import vdcoreps as vd
     from eval_real_hazards import decode as dec_any

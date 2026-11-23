@@ -55,8 +55,9 @@ def limit_cpu(mask: int = 0x00FF) -> None:
 
 # 2026-11-23 20:40 사용자: 제한 풀고 GPU 로 — 기본은 제한 없음, LUMI_CPU_LIMIT=1 일 때만 제한
 import os as _os  # noqa: E402
-if _os.environ.get("LUMI_CPU_LIMIT") == "1":
-    limit_cpu()
+# 2026-11-23 23시 사용자: CPU 사용률이 너무 높다 → 다시 기본 제한(논리 코어 4 개), LUMI_CPU_LIMIT=0 이면 해제
+if _os.environ.get("LUMI_CPU_LIMIT", "1") != "0":
+    limit_cpu(0x000F)
 from lumi_synth import hazard7, quality  # noqa: E402
 from lumi_synth.corrnet import CorrNet, lin_to_srgb, srgb_to_lin  # noqa: E402
 from make_hazard7_dataset import FPS, H, W, decode, encode, ours_judge  # noqa: E402
