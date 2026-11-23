@@ -66,29 +66,32 @@ def pixel_transitions(lum: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def screen_transitions(signed: torch.Tensor, c: int):
-    """measure.directional_areas + screen_transitions(c 소비 규칙 포함)의 GPU 판 → (e int8[T] numpy, a_up, a_dn, used_area dict)."""
+    """measure.directional_areas + screen_transitions(c 소비 규칙 포함)의 GPU 판 → (e int8[T], a_up, a_dn).
+
+    순차 상태 기계는 CPU 에서 숫자로만 돌리고, 필요한 면적은 GPU 에서 한 번에 미리 센다:
+    '마지막 전이 프레임 > t − j' ⇔ '(t−j, t] 안에 그 방향 전이가 있음' 이므로, j = 1..c 마다 이동 창 합집합 면적을 구해 두면
+    소비 규칙의 문턱 max(t − c, used) (used 는 t − c 보다 크면 t−c+1..t−1 중 하나)에 해당하는 면적을 바로 꺼낼 수 있다.
+    """
     T = signed.shape[0]
     n_px = float(signed[0].numel())
     up_f = (signed == 1); dn_f = (signed == -1)
-    # 이동 창 합집합 면적 (A↑, A↓)
     cu = torch.cumsum(up_f.to(torch.int16), 0); cd = torch.cumsum(dn_f.to(torch.int16), 0)
-    a_up = np.zeros(T); a_dn = np.zeros(T)
+
+    def win_area(cs, j):                       # (t−j, t] 안에 전이가 있는 픽셀 비율, t = 0..T−1
+        prev = torch.cat([torch.zeros_like(cs[:j]), cs[:-j]], 0) if j < T else torch.zeros_like(cs)
+        return ((cs - prev) > 0).flatten(1).sum(1).double().div(n_px).cpu().numpy()
+    A_up = {j: win_area(cu, j) for j in range(1, c + 1)}
+    A_dn = {j: win_area(cd, j) for j in range(1, c + 1)}
+    a_up, a_dn = A_up[c], A_dn[c]
+    up_any = up_f.flatten(1).any(1).cpu().numpy(); dn_any = dn_f.flatten(1).any(1).cpu().numpy()
     never = -(2 ** 30)
-    last_up = torch.full(signed.shape[1:], never, dtype=torch.int32, device=signed.device)
-    last_dn = last_up.clone()
     used_up = used_dn = never
     e = np.zeros(T, dtype=np.int8)
     state = 0
-    up_any = up_f.flatten(1).any(1).cpu().numpy(); dn_any = dn_f.flatten(1).any(1).cpu().numpy()
     for t in range(T):
-        prev_u = cu[t - c] if t - c >= 0 else 0
-        prev_d = cd[t - c] if t - c >= 0 else 0
-        a_up[t] = float(((cu[t] - prev_u) > 0).sum()) / n_px
-        a_dn[t] = float(((cd[t] - prev_d) > 0).sum()) / n_px
-        last_up = torch.where(up_f[t], torch.full_like(last_up, t), last_up)
-        last_dn = torch.where(dn_f[t], torch.full_like(last_dn, t), last_dn)
-        area_up = float((last_up > max(t - c, used_up)).sum()) / n_px
-        area_dn = float((last_dn > max(t - c, used_dn)).sum()) / n_px
+        th_u = max(t - c, used_up); th_d = max(t - c, used_dn)
+        area_up = A_up[t - th_u][t] if t - th_u >= 1 else 0.0
+        area_dn = A_dn[t - th_d][t] if t - th_d >= 1 else 0.0
         up = area_up > AREA_LIMIT and bool(up_any[t])
         dn = area_dn > AREA_LIMIT and bool(dn_any[t])
         if up and dn:
