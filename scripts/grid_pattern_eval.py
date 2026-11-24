@@ -59,7 +59,8 @@ def judge_clip(x: np.ndarray, fps: float) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--set", default="diag", choices=("diag", "south"))
+    ap.add_argument("--set", default="diag", choices=("diag", "south", "south_safe"))
+    ap.add_argument("--judge", default="p1", choices=("p1", "motion"))   # motion = P1(흐름 면제) + P2(변화 패턴)
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     jobs = []
@@ -72,6 +73,16 @@ def main():
                 seen.add(r["id"])
                 v2 = next((q["pat_frames"] >= 12 for q in rows if q["id"] == r["id"] and q["cfg"] == "maskarea"), None)
                 jobs.append((r["grp"], r["id"], lambda rid=r["id"]: (decode(ROOT / "data/hazard7/big1/train" / rid), FPS), r["pat_frames"] >= 12, v2))
+    elif a.set == "south_safe":                                       # 일상 오탐률: South 사람 '안전' 무작위 300 (시드 0)
+        from eval_real_hazards import decode as dec_any
+        src = ROOT / "data/real/south2021/social-media-study-gifs"
+        files = {p.stem: p for p in src.iterdir()}
+        lab = [r for r in csv.DictReader(open(ROOT / "data/real/south2021/social-media-study.csv", encoding="utf-8", errors="ignore"))
+               if r["dangerous"] == "safe" and r["label"] in files]
+        rng = np.random.default_rng(0)
+        for i in rng.choice(len(lab), 300, replace=False):
+            k = lab[i]["label"]
+            jobs.append(("safe", k, lambda k=k: dec_any(files[k]), None, None))
     else:
         from eval_real_hazards import decode as dec_any
         src = ROOT / "data/real/south2021/social-media-study-gifs"
@@ -85,7 +96,8 @@ def main():
         for r in pick:
             grp = "human_pattern" if r["human"]["pattern"] == "pattern" else ("safe" if r["human"]["dangerous"] == "safe" else "danger_other")
             jobs.append((grp, r["label"], lambda k=r["label"]: dec_any(files[k]), "정적 공간 패턴" in r["labels"], None))
-    out = ROOT / "data" / "judge" / f"grid_pattern_{a.set}.jsonl"
+    suf = "" if a.judge == "p1" else "_motion"
+    out = ROOT / "data" / "judge" / f"grid_pattern_{a.set}{suf}.jsonl"
     done = {json.loads(l)["id"] for l in out.read_text(encoding="utf-8").splitlines() if l.strip()} if out.exists() else set()
     t0 = time.time()
     with out.open("a", encoding="utf-8") as f:
@@ -94,15 +106,26 @@ def main():
                 continue
             try:
                 x, fps = load()
-                r = judge_clip(x, fps)
-                row = {"id": cid, "grp": grp, "v1": v1, "v2": v2, "G": r["danger"], "G_frames": r["pat_frames"], "G_best": r["best"]}
+                if a.judge == "p1":
+                    r = judge_clip(x, fps)
+                    row = {"id": cid, "grp": grp, "v1": v1, "v2": v2, "G": r["danger"], "G_frames": r["pat_frames"], "G_best": r["best"]}
+                else:
+                    from lumi_judge.grid_motion import judge_pattern_motion
+                    h, w = x.shape[1:3]
+                    if (h, w) not in _J:
+                        _J[(h, w)] = GridPatternJudge(h, w)
+                    r = judge_pattern_motion(x, fps, G=_J[(h, w)])
+                    p1 = judge_clip(x, fps)["danger"]                         # 같은 클립의 이전 G(P1 만) — 짝지은 비교
+                    strip = lambda b: None if b is None else {k: v for k, v in b.items() if k != "cells"}
+                    row = {"id": cid, "grp": grp, "v1": v1, "v2": v2, "G": p1, "G2": r["p1"] or r["p2"], "G2_p1": r["p1"], "G2_p2": r["p2"],
+                           "best1": strip(r["best1"]), "best2": strip(r["best2"])}
             except Exception as e:  # noqa: BLE001
                 row = {"id": cid, "grp": grp, "error": f"{type(e).__name__}: {e}"}
             f.write(json.dumps(row, ensure_ascii=False) + "\n"); f.flush()
             torch.cuda.empty_cache()
             if i % 20 == 0:
                 print(f"  {i}/{len(jobs)} ({time.time() - t0:.0f}s)", flush=True)
-    report(out, a.set)
+    report(out, a.set + suf)
 
 
 def report(out, name):
@@ -110,11 +133,14 @@ def report(out, name):
     R = [r for r in R if "error" not in r]
     groups = sorted({r["grp"] for r in R})
     L = [f"# 격자 판정기 G — 정지 패턴, {name} 세트", "", "> 셀 = 그 그룹에서 '패턴 위험'으로 판정한 클립 수 / 전체. v2 = 면적 수정판(diag 만).", "",
-         "| 그룹 | n | v1 원본 | v2 면적 수정 | G 격자 |", "|---|---|---|---|---|"]
+         "| 그룹 | n | v1 원본 | v2 면적 수정 | G 격자(P1) | G2 (P1 흐름 면제 + P2) |", "|---|---|---|---|---|---|"]
     for g in groups:
         rs = [r for r in R if r["grp"] == g]
         v2 = [r for r in rs if r["v2"] is not None]
-        L.append(f"| {g} | {len(rs)} | {sum(r['v1'] for r in rs)} | {sum(r['v2'] for r in v2) if v2 else '-'} | {sum(r['G'] for r in rs)} |")
+        g2 = [r for r in rs if "G2" in r]
+        v1s = [r for r in rs if r["v1"] is not None]
+        L.append(f"| {g} | {len(rs)} | {sum(r['v1'] for r in v1s) if v1s else '-'} | {sum(r['v2'] for r in v2) if v2 else '-'} | {sum(r['G'] for r in rs)} | "
+                 f"{sum(r['G2'] for r in g2) if g2 else '-'} |")
     p = ROOT / "checks" / "judge" / f"grid_pattern_{name}.md"
     p.write_text("\n".join(L) + "\n", encoding="utf-8")
     print("\n".join(L))

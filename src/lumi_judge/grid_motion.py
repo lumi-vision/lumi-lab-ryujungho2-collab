@@ -113,7 +113,7 @@ def judge_pattern_motion(frames_bgr: np.ndarray, fps: float, sample_fps: float =
     step = max(1, int(round(fps / sample_fps)))
     half = max(1, int(round(0.5 * fps)))
     p1 = np.zeros(T, bool); p2 = np.zeros(T, bool)
-    best1 = best2 = None
+    best1 = best2 = best_any = None
     lum_cache: dict[int, torch.Tensor] = {}
 
     def lum(i):
@@ -132,6 +132,8 @@ def judge_pattern_motion(frames_bgr: np.ndarray, fps: float, sample_fps: float =
         a = m["area"]
         info = {"t": round(i / fps, 2), "pairs": b["pairs"], "cpd": b["cpd"], "kind": b["kind"], "verified_seeds": b["verified_seeds"],
                 "area_static": a["static"], "area_change": a["change"], "area_flow": a["flow"], "reason": m["reason"], "cells": m["cells"]}
+        if best_any is None or sum(a.values()) > sum(best_any[k] for k in ("area_static", "area_change", "area_flow")):
+            best_any = info
         if a["static"] + a["change"] > AREA_P1:
             p1[i:i + step] = True
             if best1 is None or a["static"] + a["change"] > best1["area_static"] + best1["area_change"]:
@@ -143,5 +145,5 @@ def judge_pattern_motion(frames_bgr: np.ndarray, fps: float, sample_fps: float =
     win = max(1, int(math.ceil(fps - 1e-9))); need = int(math.ceil(0.5 * fps - 1e-9))
     cs = np.concatenate([[0], np.cumsum(p1)])
     counts = cs[np.minimum(np.arange(T) + win, T)] - cs[:T]
-    return {"p1": bool((counts >= need).any()) if T else False, "p2": bool(p2.any()), "best1": best1, "best2": best2,
+    return {"p1": bool((counts >= need).any()) if T else False, "p2": bool(p2.any()), "best1": best1, "best2": best2, "best_any": best_any,
             "p1_frames": p1, "p2_frames": p2}

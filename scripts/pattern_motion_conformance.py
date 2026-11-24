@@ -124,7 +124,7 @@ def main():
         f1 = judge_luminance(x, FPS)["dangerous"]
         v1 = v1_pattern(x)
         gd = g["p1"] or g["p2"]
-        b = g["best2"] or g["best1"]
+        b = g["best2"] or g["best1"] or g["best_any"]
         why = (f"정지 {100*b['area_static']:.0f}% · 변화 {100*b['area_change']:.0f}% · 흐름 {100*b['area_flow']:.0f}%" + (f" ({b['reason']})" if b["reason"] else "")) if b else "-"
         rows.append({"case": name, "real_area": round(100 * ar, 1), "truth": truth, "scored": scored, "G": gd, "G_p1": g["p1"], "G_p2": g["p2"],
                      "v1": v1, "F1": f1, "why": why})

@@ -3,8 +3,9 @@
     from lumi_judge.grid_judge import judge_video
     r = judge_video(frames_bgr_uint8, fps)        # → {"dangerous", "labels", "findings":[{label, clause, sentence, evidence}], "grid_png"(선택)}
 
-현재 포함: F1 휘도 깜빡임 · F2 적색 깜빡임(measure.py 와 판정 동일) · P1 정지 패턴(적합성 시험 21/21).
-아직 없음: F3 연장 깜빡임 · P2 변화 패턴·흐름 면제 — 결과에 '미구현' 으로 명시한다(없는 것을 안전이라 말하지 않음).
+포함: F1 휘도 깜빡임 · F2 적색 깜빡임(measure.py 와 판정 동일) · F3 연장 깜빡임 · P1 정지 패턴(흐름 면제 적용) · P2 변화 패턴.
+png_dir 를 주면 판정마다 대표 정지 프레임 위에 근거 칸을 칠한 PNG 를 만든다(grid_render).
+없는 것은 결과에 '미구현' 으로 명시한다(없는 것을 안전이라 말하지 않음).
 """
 from __future__ import annotations
 
@@ -14,9 +15,10 @@ import numpy as np
 import torch
 
 from .grid_flash import judge_luminance, judge_red, luminance_cd
+from .grid_motion import CLAUSE_P2, judge_pattern_motion
 from .grid_pattern import CLAUSE_P1, GridPatternJudge
 
-NOT_IMPLEMENTED = ["변화 패턴·흐름 면제(P2)", "빠른 장면 전환·교집합(팀원 판의 별도 라벨 — G 에서는 휘도 깜빡임 규칙에 포함)"]
+NOT_IMPLEMENTED = ["빠른 장면 전환·교집합(팀원 판의 별도 라벨 — G 에서는 휘도 깜빡임 규칙에 포함)"]
 CLAUSE_F3 = "연장 깜빡임: 5 초 창 안에서 1 초 전이 4–6 회(2–3 Hz)가 4 초 이상 (EA IRIS 파라미터 — 팀원 판과 같음; ITU 문구 'more than five seconds' 의 구현)"
 
 
@@ -72,29 +74,64 @@ def judge_pattern_clip(frames_bgr: np.ndarray, fps: float, sample_fps: float = 8
     return {"dangerous": danger, "best": best, "frames": pat}
 
 
-def judge_video(frames_bgr: np.ndarray, fps: float) -> dict:
-    """uint8 BGR [T,H,W,3] + fps → 라벨·조항·근거 문장."""
+def _rep_frame(r, fps):
+    """깜빡임 대표 프레임: 위험 구간 안에서 화면 전이 면적이 가장 큰 프레임."""
+    hz = np.flatnonzero(r["hazard_frames"])
+    if not hz.size:
+        return 0
+    ar = np.maximum(r["area_up"], r["area_down"])
+    return int(hz[np.argmax(ar[hz])])
+
+
+def judge_video(frames_bgr: np.ndarray, fps: float, png_dir=None, name: str = "clip") -> dict:
+    """uint8 BGR [T,H,W,3] + fps → 라벨·조항·근거 문장 (+ png_dir 가 있으면 근거 그림)."""
+    from pathlib import Path
     f1 = judge_luminance(frames_bgr, fps)
     f2 = judge_red(frames_bgr, fps)
-    p1 = judge_pattern_clip(frames_bgr, fps)
+    pm = judge_pattern_motion(frames_bgr, fps)
     findings = []
     s = _flash_sentence("휘도 깜빡임", f1)
     if s:
-        findings.append({"label": "휘도 플래시", "clause": f1["evidence"]["clause"], "sentence": s, "evidence": f1["evidence"]})
+        findings.append({"label": "휘도 플래시", "clause": f1["evidence"]["clause"], "sentence": s, "evidence": f1["evidence"],
+                         "_frame": _rep_frame(f1, fps), "_cells": f1["evidence"]["cells"], "_shape": f1["evidence"]["grid_shape"]})
     s = _flash_sentence("적색 깜빡임", f2)
     if s:
-        findings.append({"label": "적색 플래시", "clause": f2["evidence"]["clause"], "sentence": s, "evidence": f2["evidence"]})
+        findings.append({"label": "적색 플래시", "clause": f2["evidence"]["clause"], "sentence": s, "evidence": f2["evidence"],
+                         "_frame": _rep_frame(f2, fps), "_cells": f2["evidence"]["cells"], "_shape": f2["evidence"]["grid_shape"]})
     for r_, nm in ((f1, "휘도 연장"), (f2, "적색 연장")):
         fx = None if r_["dangerous"] else _extended(r_, fps, nm)       # 1 초 기준 위반이 없을 때만(팀원 판과 같은 우선순위)
         if fx:
+            fx.update(_frame=int(fx["evidence"]["first_fail_s"] * fps), _cells=[], _shape=r_["evidence"]["grid_shape"])
             findings.append(fx)
-    if p1["dangerous"] and p1["best"]:
-        b = p1["best"]
+    h, w = frames_bgr.shape[1:3]
+    shp = [max(1, int(round(32 * h / w))), 32]
+    if pm["p1"] and pm["best1"]:
+        b = pm["best1"]
         findings.append({"label": "정적 공간 패턴", "clause": CLAUSE_P1,
-                         "sentence": (f"{_sec(b['t'])} 무렵, 화면의 {100 * b['area']:.0f}%에 {b['kind']} 줄무늬 {b['pairs']}쌍(약 {b['cpd']:.1f} cpd), "
-                                      f"영역 곳곳 {b.get('verified_seeds', '?')} 지점에서 규격대로 확인 → 기준(5쌍 초과, 면적 40 % 초과, 0.5초 이상) 넘음"),
-                         "evidence": {k: b[k] for k in ("area", "pairs", "cpd", "kind", "cells", "verified_seeds", "t") if k in b}})
+                         "sentence": (f"{_sec(b['t'])} 무렵, 화면의 {100 * (b['area_static'] + b['area_change']):.0f}%에 {b['kind']} 줄무늬 {b['pairs']}쌍"
+                                      f"(약 {b['cpd']:.1f} cpd)이 멈춰 있음(흐름 면제 {100 * b['area_flow']:.0f}% 제외), 영역 곳곳 {b['verified_seeds']} 지점에서 규격대로 확인 "
+                                      "→ 기준(5쌍 초과, 면적 40 % 초과, 0.5초 이상) 넘음"),
+                         "evidence": {k: b[k] for k in ("t", "pairs", "cpd", "kind", "verified_seeds", "area_static", "area_change", "area_flow")},
+                         "_frame": int(b["t"] * fps), "_cells": b["cells"]["static"] + b["cells"]["change"], "_flow": b["cells"]["flow"], "_shape": shp})
+    if pm["p2"] and pm["best2"]:
+        b = pm["best2"]
+        findings.append({"label": "변화 공간 패턴", "clause": CLAUSE_P2,
+                         "sentence": (f"{_sec(b['t'])} 무렵, 화면의 {100 * b['area_change']:.0f}%에서 줄무늬 {b['pairs']}쌍(약 {b['cpd']:.1f} cpd)이 "
+                                      f"{b['reason']} → 기준(5쌍 초과, 면적 25 % 초과, 한 방향 흐름 아님) 넘음"),
+                         "evidence": {k: b[k] for k in ("t", "pairs", "cpd", "kind", "verified_seeds", "area_static", "area_change", "area_flow", "reason")},
+                         "_frame": int(b["t"] * fps), "_cells": b["cells"]["change"], "_flow": b["cells"]["flow"], "_shape": shp})
+    if png_dir is not None:
+        from .grid_render import draw
+        for i, f in enumerate(findings):
+            t = min(max(0, f["_frame"]), len(frames_bgr) - 1)
+            layers = [(f["label"], f["_cells"], tuple(f["_shape"]))]
+            if f.get("_flow"):
+                layers.append(("흐름(면제)", f["_flow"], tuple(f["_shape"])))
+            f["grid_png"] = draw(frames_bgr[t], layers, f"{name}  t={t / fps:.2f}s  {f['label']}", Path(png_dir) / f"{name}_{i}_{t / fps:.2f}s.png")
+    for f in findings:
+        for k in [k for k in f if k.startswith("_")]:
+            f.pop(k)
     return {"dangerous": bool(findings), "labels": [f["label"] for f in findings], "findings": findings,
             "not_implemented": NOT_IMPLEMENTED,
             "summary": ("위험: " + " / ".join(f["sentence"] for f in findings)) if findings else
-                       "기준을 넘는 휘도·적색 깜빡임, 연장 깜빡임, 정지 패턴이 없음 (변화 패턴은 아직 판정하지 않음)"}
+                       "기준을 넘는 휘도·적색 깜빡임, 연장 깜빡임, 정지·변화 패턴이 없음"}
