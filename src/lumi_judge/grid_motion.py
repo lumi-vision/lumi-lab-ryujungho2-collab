@@ -14,7 +14,8 @@
   3. 칸 판정
      - 흐름  : 세기가 남아 있는 프레임(a_t ≥ ½ a_0)의 절반 이상에서 |v_t| ≥ ε 이고, 그 방향(부호)이 모두 같고, 반전(|v_t| > ¾π)이 없음
      - 변화  : (흐름이 아니고) 대비 반전(|v_t| > ¾π) 또는 진동·방향 전환(움직이는 프레임끼리 부호가 바뀜)
-               또는 점멸·방향 바뀜(세기가 ½ a_0 아래로 떨어짐 — 다른 방향 줄무늬로 바뀌어도 원래 필터 세기가 떨어진다)
+               또는 점멸·방향 바뀜(세기가 ½ a_0 문턱을 2 번 이상 넘나듦 — 다른 방향 줄무늬로 바뀌어도 원래 필터 세기가 떨어진다;
+               한 번 나타나거나 사라지는 것은 점멸이 아님: 2026-11-25 합성 진단에서 정지 무늬의 등장을 점멸로 오분류한 것을 고침)
      - 정지  : 그 밖(움직임 중앙값 < ε)
      ε = 0.5 주기/초 를 프레임당 위상으로 (그보다 느린 움직임은 정지로 봄).
   4. 면적(확인 비율을 곱한 줄무늬 픽셀) — 변화 > 25 % → P2 · 정지 + 변화 > 40 % → P1(변화는 정지보다 덜 위험하지 않으므로 합산) · 흐름 칸은 둘 다에서 뺌.
@@ -34,7 +35,9 @@ CLAUSE_P2 = ("ITU-R BT.1702-3 Att.1 · Ofcom Annex 1 (줄무늬가 방향 전환
              "한 방향으로 매끄럽게 흐르면 면제)")
 FLOW_MIN_PPS = 0.5          # 주기/초 — 이보다 느리면 정지 (구현 선택)
 REV_PHASE = 0.75 * math.pi  # 한 프레임 위상 변화가 이보다 크면 대비 반전 (반전 = π)
-AMP_DROP = 0.5              # 세기가 표본 프레임의 절반 아래 → 점멸·방향 바뀜
+AMP_DROP = 0.5              # 세기가 표본 프레임의 절반 아래 → 점멸·방향 바뀜 (문턱을 2 번 이상 넘나들 때만)
+REV_MIN = 2                 # 대비 반전으로 볼 반전 프레임 수 하한(1 초 창) — 점멸과 같은 '반복' 기준
+MIN_RUN = 2                 # 방향 전환으로 셀 움직임 구간의 최소 길이(프레임)
 FLOW_FRAC = 0.5             # 흐름: 세기가 남은 프레임 중 움직이는 비율 하한
 CELL_MIN_PX = 0.10          # 칸 픽셀 중 줄무늬 픽셀이 이 비율 이상인 칸만 판정
 AREA_P2, AREA_P1 = 0.25, 0.40
@@ -83,10 +86,20 @@ def classify_motion(G: GridPatternJudge, lums: list[torch.Tensor], a_idx: int, b
         strong = A[1:, c] >= AMP_DROP * A0[c]                          # v_t 는 (t−1,t) 사이 — 뒤 프레임 기준
         vv = V[:, c]
         moving = np.abs(vv) >= eps
-        rev = bool((np.abs(vv[strong]) > REV_PHASE).any())
+        rev = int((np.abs(vv[strong]) > REV_PHASE).sum()) >= REV_MIN    # 반복된 반전만(한 프레임 위상 튐 제외) — 2026-11-25 변경
         mv = vv[strong & moving]
-        sgn_change = bool((np.diff(np.sign(mv)) != 0).any()) if len(mv) > 1 else False
-        drop = bool((A[:, c] < AMP_DROP * A0[c]).any())
+        # 방향 전환: 같은 부호로 2 프레임 이상 이어진 움직임 구간끼리 부호가 바뀜(한 프레임 잡음 부호는 무시) — 2026-11-25 변경
+        runs = []
+        for sg in np.sign(mv):
+            if runs and runs[-1][0] == sg:
+                runs[-1][1] += 1
+            else:
+                runs.append([sg, 1])
+        kept = [r_[0] for r_ in runs if r_[1] >= MIN_RUN]
+        sgn_change = any(a_ != b_ for a_, b_ in zip(kept[:-1], kept[1:]))
+        # 점멸: 세기가 문턱(½ a_0)을 두 번 이상 넘나듦(켜짐→꺼짐→켜짐 또는 그 반대). 한 번 나타나거나 사라지는 것은 점멸이 아님 — 2026-11-25 변경
+        on = A[:, c] >= AMP_DROP * A0[c]
+        drop = int((on[1:] != on[:-1]).sum()) >= 2
         if strong.sum() and (strong & moving).sum() >= FLOW_FRAC * strong.sum() and not sgn_change and not rev:
             klass[c] = "flow"
         elif rev:
