@@ -49,18 +49,20 @@ def pixels_per_degree(w: int, h: int, angle_deg: float = 0.0) -> float:
 class PatternBank:
     """주파수 영역 복소 필터 묶음 (방향 θ = 파수 벡터 방향 = 줄무늬의 법선 방향)."""
 
-    def __init__(self, h: int, w: int, device="cuda"):
+    def __init__(self, h: int, w: int, device="cuda", cpd_lo: float = CPD_LO, cpd_hi: float = CPD_HI):
         self.h, self.w, self.device = h, w, device
         ppd = pixels_per_degree(w, h)
         nyq_cpd = 0.5 * ppd
-        self.cpds = np.exp(np.linspace(math.log(CPD_LO), math.log(min(CPD_HI, 0.9 * nyq_cpd)), N_FREQ))
+        n_f = N_FREQ if cpd_lo >= CPD_LO else N_FREQ + int(math.ceil(math.log(CPD_LO / cpd_lo) / math.log(10.0 ** (1 / 7))))   # 아래로 넓히면 같은 간격으로 필터 추가
+        self.cpds = np.exp(np.linspace(math.log(cpd_lo), math.log(min(cpd_hi, 0.9 * nyq_cpd)), n_f))
+        self.n_freq = n_f
         self.thetas = np.arange(N_THETA) * (180.0 / N_THETA)
         fy = torch.fft.fftfreq(h, device=device)[:, None].expand(h, w)
         fx = torch.fft.fftfreq(w, device=device)[None, :].expand(h, w)
         rad = torch.hypot(fx, fy).clamp_min(1e-9)
         ang = torch.atan2(fy, fx)
         filt = []
-        s_log = math.log(self.cpds[1] / self.cpds[0]) if N_FREQ > 1 else 0.5   # 이웃 주파수 간격 = 1 σ
+        s_log = math.log(self.cpds[1] / self.cpds[0]) if n_f > 1 else 0.5   # 이웃 주파수 간격 = 1 σ
         s_th = math.radians(180.0 / N_THETA) * 0.8
         for th in self.thetas:
             t = math.radians(th)
@@ -80,8 +82,8 @@ class PatternBank:
         X = torch.fft.fft2(lum - lum.mean())
         R = torch.fft.ifft2(X[None] * self.F).abs() * self.gain                # [K,h,w]
         amp, k = R.max(0)
-        th = torch.as_tensor(self.thetas, device=lum.device, dtype=torch.float32)[k // N_FREQ]
-        cp = torch.as_tensor(self.cpds, device=lum.device, dtype=torch.float32)[k % N_FREQ]
+        th = torch.as_tensor(self.thetas, device=lum.device, dtype=torch.float32)[k // self.n_freq]
+        cp = torch.as_tensor(self.cpds, device=lum.device, dtype=torch.float32)[k % self.n_freq]
         return k, amp, th, cp
 
 
@@ -200,10 +202,13 @@ def _sdr(pse):
 
 
 class GridPatternJudge:
-    def __init__(self, h: int, w: int, device="cuda", grid_cols: int = 32, hdr: bool = False):
+    def __init__(self, h: int, w: int, device="cuda", grid_cols: int = 32, hdr: bool = False,
+                 cpd_lo: float = CPD_LO, cpd_hi: float = CPD_HI):
+        """cpd_lo/hi: 줄무늬 공간 주파수 대역 — 기본 1–10(팀원 값, 출처 없음) · 1–8(Fisher 2026 EF 합의) · 하한 없음(BT.1702-3 원문, 실제로는 0.15)."""
         self.hdr = hdr
         self.h, self.w, self.device = h, w, device
-        self.bank = PatternBank(h, w, device)
+        self.cpd_lo, self.cpd_hi = cpd_lo, cpd_hi
+        self.bank = PatternBank(h, w, device, cpd_lo, cpd_hi)
         self.rows = max(1, int(round(grid_cols * h / w))); self.cols = grid_cols
         self.ppd = pixels_per_degree(w, h)
 
@@ -260,6 +265,9 @@ class GridPatternJudge:
             for i, (v, t) in enumerate(profs):
                 V[i, :len(v)] = v; T[i, :len(t)] = t
             pse_u = pse if self.hdr else _sdr(pse)
+            if (self.cpd_lo, self.cpd_hi) != (CPD_LO, CPD_HI):
+                import dataclasses
+                pse_u = dataclasses.replace(pse_u, pattern_cpd_min=self.cpd_lo, pattern_cpd_max=self.cpd_hi)
             P, C, _, NE, ET, EV = hyst_runs(V, T, lens, pse_u)
             P = P.get(); C = C.get(); NE = NE.get(); ET = ET.get(); EV = EV.get()
             reg_ok = np.array([_best_run_regularity(ET[i], EV[i], int(NE[i]), pse_u) <= LOCAL_REG_MAX for i in range(len(P))])
