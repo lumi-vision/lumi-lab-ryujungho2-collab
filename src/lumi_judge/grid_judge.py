@@ -131,7 +131,12 @@ def judge_video(frames_bgr: np.ndarray, fps: float, png_dir=None, name: str = "c
     for f in findings:
         for k in [k for k in f if k.startswith("_")]:
             f.pop(k)
-    return {"dangerous": bool(findings), "labels": [f["label"] for f in findings], "findings": findings,
+    notes = []
+    ba = pm.get("best_any")
+    if ba and ba["area_flow"] > 0.25 and not (pm["p1"] or pm["p2"]):          # 면제로 안전이 된 경우도 이유를 남긴다(설명 가능성)
+        notes.append(f"{_sec(ba['t'])} 무렵 화면의 {100 * ba['area_flow']:.0f}%에 줄무늬 {ba['pairs']}쌍이 있으나 한 방향으로 매끄럽게 흐름 "
+                     "→ 규격의 흐름 면제(BT.1702-3 Att.1)로 패턴 위험 아님")
+    return {"dangerous": bool(findings), "labels": [f["label"] for f in findings], "findings": findings, "notes": notes,
             "not_implemented": NOT_IMPLEMENTED,
             "summary": ("위험: " + " / ".join(f["sentence"] for f in findings)) if findings else
                        "기준을 넘는 휘도·적색 깜빡임, 연장 깜빡임, 정지·변화 패턴이 없음"}
