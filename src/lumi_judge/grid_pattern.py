@@ -208,7 +208,8 @@ class GridPatternJudge:
         self.ppd = pixels_per_degree(w, h)
 
     @torch.no_grad()
-    def frame(self, lum: torch.Tensor, pse=None, n_seeds: int = 12) -> dict:
+    def frame(self, lum: torch.Tensor, pse=None, n_seeds: int = 12, area_min: float = AREA_MIN, maps: bool = False) -> dict:
+        """area_min: 정지 0.40(기본) · 변화 패턴 후보(P2) 0.25. maps=True 면 best 에 'mask'(줄무늬 픽셀, np bool)·'k_map'(픽셀별 필터 번호)·'verified' 를 넣는다."""
         from .config import PSEConfig
         pse = pse or PSEConfig()
         k, amp, th, cp = self.bank.respond(lum)
@@ -238,7 +239,7 @@ class GridPatternJudge:
                 reg_d[max(0, int((r - 1) * cell_h)):int((r + 2) * cell_h), max(0, int((c - 1) * cell_w)):int((c + 2) * cell_w)] = True
             pat = reg_d & cand_np & (amp_np >= HALF_AMP * a_core)
             area = float(pat.mean())
-            if area <= AREA_MIN:                                               # 면적 미달 영역은 확인 생략(판정 불변)
+            if area <= area_min:                                               # 면적 미달 영역은 확인 생략(판정 불변)
                 continue
             # 씨앗 = 영역 칸 전체에서 고르게 뽑은 칸마다 그 칸의 줄무늬 픽셀 중 진폭 최대 점 (확인 비율이 면적의 치우치지 않은 추정이 되도록)
             seeds = []
@@ -270,7 +271,9 @@ class GridPatternJudge:
             area = area * verified
             dth = np.std([th_c[r, c] for r, c in cells])
             kind = "직선" if dth < 10 else "곡선·방사"
-            if pairs >= MIN_PAIRS and area > AREA_MIN and area > best["area"]:
+            if pairs >= MIN_PAIRS and area > area_min and area > best["area"]:
                 best = {"is_pat": True, "area": area, "pairs": pairs, "cpd": cpd, "kind": kind, "verified_seeds": f"{int((Pq >= MIN_PAIRS).sum())}/{len(Pq)}",
                         "cells": [[int(r), int(c)] for r, c in cells]}
+                if maps:
+                    best.update(mask=pat, k_map=k, verified=verified)
         return best
