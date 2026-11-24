@@ -52,6 +52,7 @@ def _responses(bank, lum: torch.Tensor, ks: torch.Tensor) -> torch.Tensor:
 @torch.no_grad()
 def classify_motion(G: GridPatternJudge, lums: list[torch.Tensor], a_idx: int, best: dict, fps: float) -> dict:
     """lums: 1 초 창 프레임 밝기(cd/m²), a_idx: 그중 표본 프레임 위치. → 칸별 class 와 면적."""
+    G = best.get("judge") or G                                         # 두 패스 판정기면 그 결과를 낸 패스의 필터로
     h, w = G.h, G.w
     mask = torch.from_numpy(best["mask"]).to(lums[0].device)
     kmap = best["k_map"]

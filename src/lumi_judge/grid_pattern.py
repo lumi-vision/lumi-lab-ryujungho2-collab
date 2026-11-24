@@ -203,12 +203,21 @@ def _sdr(pse):
 
 class GridPatternJudge:
     def __init__(self, h: int, w: int, device="cuda", grid_cols: int = 32, hdr: bool = False,
-                 cpd_lo: float = CPD_LO, cpd_hi: float = CPD_HI):
+                 cpd_lo: float = CPD_LO, cpd_hi: float = CPD_HI, count_lo: float | None = None, count_hi: float | None = None):
         """cpd_lo/hi: 줄무늬 공간 주파수 대역 — 기본 1–10(팀원 값, 출처 없음) · 1–8(Fisher 2026 EF 합의) · 하한 없음(BT.1702-3 원문, 실제로는 0.15)."""
         self.hdr = hdr
         self.h, self.w, self.device = h, w, device
         self.cpd_lo, self.cpd_hi = cpd_lo, cpd_hi
-        self.bank = PatternBank(h, w, device, cpd_lo, cpd_hi)
+        self.count_lo = cpd_lo if count_lo is None else count_lo          # 쌍을 셀 때의 cpd 범위(필터 대역과 따로 둘 수 있음)
+        self.count_hi = cpd_hi if count_hi is None else count_hi
+        self.subs = None
+        if cpd_lo < CPD_LO and count_lo is None:
+            # 하한을 1 cpd 아래로 넓힐 때: 한 필터 묶음으로 같이 고르면 줄무늬 영역 전체의 밝기 계단(바탕과의 차)에 저주파 필터가
+            # 더 크게 반응해 줄무늬 대신 '덩어리'를 고른다(적합성: 어두운 막대 155 cd/m² 사례에서 확인, 2026-11-25).
+            # → 두 패스로 따로 찾고(① 1 cpd 이상 필터 ② 저주파 필터), 둘 다 쌍은 같은 넓은 범위로 센 뒤 면적이 큰 쪽.
+            self.subs = [GridPatternJudge(h, w, device, grid_cols, hdr, CPD_LO, cpd_hi, count_lo=cpd_lo, count_hi=cpd_hi),
+                         GridPatternJudge(h, w, device, grid_cols, hdr, cpd_lo, 1.4, count_lo=cpd_lo, count_hi=cpd_hi)]
+        self.bank = self.subs[0].bank if self.subs else PatternBank(h, w, device, cpd_lo, cpd_hi)
         self.rows = max(1, int(round(grid_cols * h / w))); self.cols = grid_cols
         self.ppd = pixels_per_degree(w, h)
 
@@ -217,6 +226,12 @@ class GridPatternJudge:
         """area_min: 정지 0.40(기본) · 변화 패턴 후보(P2) 0.25. maps=True 면 best 에 'mask'(줄무늬 픽셀, np bool)·'k_map'(픽셀별 필터 번호)·'verified' 를 넣는다."""
         from .config import PSEConfig
         pse = pse or PSEConfig()
+        if self.subs:
+            outs = [g.frame(lum, pse, n_seeds, area_min, maps) for g in self.subs]
+            for g, o in zip(self.subs, outs):
+                if maps and o["is_pat"]:
+                    o["judge"] = g
+            return max(outs, key=lambda o: (o["is_pat"], o["area"]))
         k, amp, th, cp = self.bank.respond(lum)
         cand = (2.0 * amp >= CAND_FRAC * pse.delta_lum_min_cd_m2)
         frac, th_c, f_c, coh = _cells(cand, th, cp, self.rows, self.cols)
@@ -265,9 +280,9 @@ class GridPatternJudge:
             for i, (v, t) in enumerate(profs):
                 V[i, :len(v)] = v; T[i, :len(t)] = t
             pse_u = pse if self.hdr else _sdr(pse)
-            if (self.cpd_lo, self.cpd_hi) != (CPD_LO, CPD_HI):
+            if (self.count_lo, self.count_hi) != (CPD_LO, CPD_HI):
                 import dataclasses
-                pse_u = dataclasses.replace(pse_u, pattern_cpd_min=self.cpd_lo, pattern_cpd_max=self.cpd_hi)
+                pse_u = dataclasses.replace(pse_u, pattern_cpd_min=self.count_lo, pattern_cpd_max=self.count_hi)
             P, C, _, NE, ET, EV = hyst_runs(V, T, lens, pse_u)
             P = P.get(); C = C.get(); NE = NE.get(); ET = ET.get(); EV = EV.get()
             reg_ok = np.array([_best_run_regularity(ET[i], EV[i], int(NE[i]), pse_u) <= LOCAL_REG_MAX for i in range(len(P))])
