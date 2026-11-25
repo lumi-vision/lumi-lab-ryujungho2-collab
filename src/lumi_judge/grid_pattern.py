@@ -222,12 +222,15 @@ class GridPatternJudge:
         self.ppd = pixels_per_degree(w, h)
 
     @torch.no_grad()
-    def frame(self, lum: torch.Tensor, pse=None, n_seeds: int = 12, area_min: float = AREA_MIN, maps: bool = False) -> dict:
-        """area_min: 정지 0.40(기본) · 변화 패턴 후보(P2) 0.25. maps=True 면 best 에 'mask'(줄무늬 픽셀, np bool)·'k_map'(픽셀별 필터 번호)·'verified' 를 넣는다."""
+    def frame(self, lum: torch.Tensor, pse=None, n_seeds: int = 12, area_min: float = AREA_MIN, maps: bool = False,
+              seed_mode: str = "max", rng=None) -> dict:
+        """area_min: 정지 0.40(기본) · 변화 패턴 후보(P2) 0.25. maps=True 면 best 에 'mask'(줄무늬 픽셀, np bool)·'k_map'(픽셀별 필터 번호)·'verified' 를 넣는다.
+        seed_mode: 'max'(기본 — 칸 목록에서 고르게 n 칸, 각 칸의 진폭 최대 픽셀) · 'random'(칸 n 개 무작위, 칸 안 줄무늬 픽셀 무작위; rng 필요).
+        best['regions'] = 확인까지 간 영역마다 (원면적, 확인 비율, 경로 수) — 씨앗 민감도 분석용 (2026-11-26)."""
         from .config import PSEConfig
         pse = pse or PSEConfig()
         if self.subs:
-            outs = [g.frame(lum, pse, n_seeds, area_min, maps) for g in self.subs]
+            outs = [g.frame(lum, pse, n_seeds, area_min, maps, seed_mode, rng) for g in self.subs]
             for g, o in zip(self.subs, outs):
                 if maps and o["is_pat"]:
                     o["judge"] = g
@@ -237,7 +240,7 @@ class GridPatternJudge:
         frac, th_c, f_c, coh = _cells(cand, th, cp, self.rows, self.cols)
         on = frac >= CELL_MIN_FRAC
         lab, n = _regions(on, th_c, f_c, coh)
-        best = {"is_pat": False, "area": 0.0, "pairs": 0, "cpd": 0.0, "cells": [], "kind": None}
+        best = {"is_pat": False, "area": 0.0, "pairs": 0, "cpd": 0.0, "cells": [], "kind": None, "regions": []}
         if n == 0:
             return best
         cell_h, cell_w = self.h / self.rows, self.w / self.cols
@@ -263,14 +266,20 @@ class GridPatternJudge:
                 continue
             # 씨앗 = 영역 칸 전체에서 고르게 뽑은 칸마다 그 칸의 줄무늬 픽셀 중 진폭 최대 점 (확인 비율이 면적의 치우치지 않은 추정이 되도록)
             seeds = []
-            order = np.linspace(0, len(cells) - 1, min(n_seeds, len(cells))).round().astype(int)
+            if seed_mode == "random":
+                order = rng.choice(len(cells), min(n_seeds, len(cells)), replace=False)
+            else:
+                order = np.linspace(0, len(cells) - 1, min(n_seeds, len(cells))).round().astype(int)
             for ci in order:
                 r, c = cells[ci]
                 y0_, y1_ = int(r * cell_h), int((r + 1) * cell_h); x0_, x1_ = int(c * cell_w), int((c + 1) * cell_w)
                 blk = np.where(pat[y0_:y1_, x0_:x1_], amp_np[y0_:y1_, x0_:x1_], -1)
                 if blk.max() <= 0:
                     continue
-                yy_, xx_ = np.unravel_index(int(np.argmax(blk)), blk.shape)
+                if seed_mode == "random":
+                    yy_s, xx_s = np.nonzero(blk > 0); q = int(rng.integers(len(yy_s))); yy_, xx_ = int(yy_s[q]), int(xx_s[q])
+                else:
+                    yy_, xx_ = np.unravel_index(int(np.argmax(blk)), blk.shape)
                 seeds.append((y0_ + yy_, x0_ + xx_))
             profs = _trace_profiles(lum, th, pat, seeds, self.ppd)
             if not profs:
@@ -291,12 +300,13 @@ class GridPatternJudge:
             pairs, cpd = int(Pq[j]), float(C[j])
             # 표본 확인 면적: 영역 곳곳의 씨앗 중 규격대로(쌍 > 5·규칙적) 확인된 비율만큼만 면적으로 인정 — 질감이 한두 곳에서 우연히 맞는 경우 차단
             verified = float((Pq >= MIN_PAIRS).mean())
+            best["regions"].append((area, verified, int(len(Pq))))
             area = area * verified
             dth = np.std([th_c[r, c] for r, c in cells])
             kind = "직선" if dth < 10 else "곡선·방사"
             if pairs >= MIN_PAIRS and area > area_min and area > best["area"]:
                 best = {"is_pat": True, "area": area, "pairs": pairs, "cpd": cpd, "kind": kind, "verified_seeds": f"{int((Pq >= MIN_PAIRS).sum())}/{len(Pq)}",
-                        "cells": [[int(r), int(c)] for r, c in cells]}
+                        "cells": [[int(r), int(c)] for r, c in cells], "regions": best["regions"]}
                 if maps:
                     best.update(mask=pat, k_map=k, verified=verified)
         return best
