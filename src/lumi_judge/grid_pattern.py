@@ -37,11 +37,29 @@ HALF_AMP = 0.5                # 패턴 경계 = 영역 핵심 진폭의 절반(�
 AREA_MIN, MIN_PAIRS = 0.40, 6
 
 
-def pixels_per_degree(w: int, h: int, angle_deg: float = 0.0) -> float:
-    """measure.pixels_per_degree 와 같은 시청 조건(56 cm, 15인치 16:9)."""
-    diag, k, dist = 15.0 * 2.54, math.hypot(16.0, 9.0), 56.0
-    fov_w = 2.0 * math.degrees(math.atan(diag * 16.0 / k / (2.0 * dist)))
-    fov_h = 2.0 * math.degrees(math.atan(diag * 9.0 / k / (2.0 * dist)))
+# 시청 조건 = (화면 대각선 인치, 시청 거리 cm). 영상이 그 대각선의 화면을 자기 가로세로 비율로 채운다고 본다(구현 선택).
+# 16:9 영상이면 2026-11-26 이전(15인치 16:9 고정)과 값이 같다. 출처: PATTERN_LITERATURE.md 의 JV24 Table 2 행.
+VIEW_PRESETS = {
+    "laptop15": (15.0, 56.0),     # WCAG Note 1 "15-17 inch screen at 22-26 inches" (기본, 기존 값)
+    "monitor23": (23.0, 71.1),    # trace24 기준 화면(23인치 FHD, 71.1 cm)
+    "phone6": (6.1, 32.0),        # 6.1인치 폰 32 cm (JV24 Table 2)
+    "tv20_7h": (20.0, 7.0 * 20.0 * 2.54 * 9.0 / math.hypot(16.0, 9.0)),   # 20인치 TV, 화면 높이의 7 배 거리(Wilkins 2005 기하)
+}
+VIEW_DEFAULT = VIEW_PRESETS["laptop15"]
+
+
+def field_of_view(w: int, h: int, view=VIEW_DEFAULT) -> tuple[float, float]:
+    """(가로 시각도, 세로 시각도) — 대각선 view[0] 인치 화면을 영상 비율 w:h 로 채움, 거리 view[1] cm."""
+    diag, dist = view[0] * 2.54, view[1]
+    k = math.hypot(w, h)
+    fov_w = 2.0 * math.degrees(math.atan(diag * w / k / (2.0 * dist)))
+    fov_h = 2.0 * math.degrees(math.atan(diag * h / k / (2.0 * dist)))
+    return fov_w, fov_h
+
+
+def pixels_per_degree(w: int, h: int, angle_deg: float = 0.0, view=VIEW_DEFAULT) -> float:
+    """방향 angle_deg 의 픽셀/도. 해상도(w, h)·화면 크기·시청 거리에 따라 달라진다."""
+    fov_w, fov_h = field_of_view(w, h, view)
     a = math.radians(angle_deg)
     return 1.0 / math.hypot(math.cos(a) / (w / fov_w), math.sin(a) / (h / fov_h))
 
@@ -49,9 +67,9 @@ def pixels_per_degree(w: int, h: int, angle_deg: float = 0.0) -> float:
 class PatternBank:
     """주파수 영역 복소 필터 묶음 (방향 θ = 파수 벡터 방향 = 줄무늬의 법선 방향)."""
 
-    def __init__(self, h: int, w: int, device="cuda", cpd_lo: float = CPD_LO, cpd_hi: float = CPD_HI):
+    def __init__(self, h: int, w: int, device="cuda", cpd_lo: float = CPD_LO, cpd_hi: float = CPD_HI, view=VIEW_DEFAULT):
         self.h, self.w, self.device = h, w, device
-        ppd = pixels_per_degree(w, h)
+        ppd = pixels_per_degree(w, h, view=view)
         nyq_cpd = 0.5 * ppd
         n_f = N_FREQ if cpd_lo >= CPD_LO else N_FREQ + int(math.ceil(math.log(CPD_LO / cpd_lo) / math.log(10.0 ** (1 / 7))))   # 아래로 넓히면 같은 간격으로 필터 추가
         self.cpds = np.exp(np.linspace(math.log(cpd_lo), math.log(min(cpd_hi, 0.9 * nyq_cpd)), n_f))
@@ -152,7 +170,7 @@ def _regions(on, th_c, f_c, coh=None):
 
 
 @torch.no_grad()
-def _trace_profiles(lum, th_px, inreg, seeds, ppd, step=TRACE_STEP, max_len=16000):
+def _trace_profiles(lum, th_px, inreg, seeds, ppd, step=TRACE_STEP, max_len=16000, view=VIEW_DEFAULT):
     """씨앗마다 국소 법선(θ)을 따라 양쪽으로 경로를 그리며 밝기 단면(cd/m²)과 누적 거리(도)를 얻는다."""
     h, w = lum.shape
     L = lum.cpu().numpy(); TH = th_px.cpu().numpy(); IN = inreg
@@ -188,7 +206,7 @@ def _trace_profiles(lum, th_px, inreg, seeds, ppd, step=TRACE_STEP, max_len=1600
         v = (L[y0i, x0i] * (1 - fy) * (1 - fx) + L[y0i + 1, x0i] * fy * (1 - fx) + L[y0i, x0i + 1] * (1 - fy) * fx + L[y0i + 1, x0i + 1] * fy * fx)
         seg = np.hypot(np.diff(ys), np.diff(xs))
         ang = np.degrees(np.arctan2(np.diff(ys), np.diff(xs)))
-        ppd_s = np.array([pixels_per_degree(w, h, float(a_)) for a_ in ang]) if len(ang) else np.array([ppd])
+        ppd_s = np.array([pixels_per_degree(w, h, float(a_), view) for a_ in ang]) if len(ang) else np.array([ppd])
         theta = np.concatenate([[0.0], np.cumsum(seg / ppd_s)])
         out.append((v.astype(np.float64), theta))
     return out
@@ -203,7 +221,10 @@ def _sdr(pse):
 
 class GridPatternJudge:
     def __init__(self, h: int, w: int, device="cuda", grid_cols: int = 32, hdr: bool = False,
-                 cpd_lo: float = CPD_LO, cpd_hi: float = CPD_HI, count_lo: float | None = None, count_hi: float | None = None):
+                 cpd_lo: float = CPD_LO, cpd_hi: float = CPD_HI, count_lo: float | None = None, count_hi: float | None = None,
+                 view=VIEW_DEFAULT, grid_deg: float | None = None):
+        """view: 시청 조건 (대각선 인치, 거리 cm) — VIEW_PRESETS 참고. grid_deg: 격자 칸 한 변(시각도 °). 주면 grid_cols 대신
+        칸 수 = 시야각 / grid_deg 로 정해져 해상도·화면 크기·거리가 달라도 칸이 '같은 시각 크기'가 된다(None 이면 가로 grid_cols 칸, 기존)."""
         """cpd_lo/hi: 줄무늬 공간 주파수 대역 — 기본 1–10(팀원 값, 출처 없음) · 1–8(Fisher 2026 EF 합의) · 하한 없음(BT.1702-3 원문, 실제로는 0.15)."""
         self.hdr = hdr
         self.h, self.w, self.device = h, w, device
@@ -215,11 +236,16 @@ class GridPatternJudge:
             # 하한을 1 cpd 아래로 넓힐 때: 한 필터 묶음으로 같이 고르면 줄무늬 영역 전체의 밝기 계단(바탕과의 차)에 저주파 필터가
             # 더 크게 반응해 줄무늬 대신 '덩어리'를 고른다(적합성: 어두운 막대 155 cd/m² 사례에서 확인, 2026-11-25).
             # → 두 패스로 따로 찾고(① 1 cpd 이상 필터 ② 저주파 필터), 둘 다 쌍은 같은 넓은 범위로 센 뒤 면적이 큰 쪽.
-            self.subs = [GridPatternJudge(h, w, device, grid_cols, hdr, CPD_LO, cpd_hi, count_lo=cpd_lo, count_hi=cpd_hi),
-                         GridPatternJudge(h, w, device, grid_cols, hdr, cpd_lo, 1.4, count_lo=cpd_lo, count_hi=cpd_hi)]
-        self.bank = self.subs[0].bank if self.subs else PatternBank(h, w, device, cpd_lo, cpd_hi)
-        self.rows = max(1, int(round(grid_cols * h / w))); self.cols = grid_cols
-        self.ppd = pixels_per_degree(w, h)
+            self.subs = [GridPatternJudge(h, w, device, grid_cols, hdr, CPD_LO, cpd_hi, count_lo=cpd_lo, count_hi=cpd_hi, view=view, grid_deg=grid_deg),
+                         GridPatternJudge(h, w, device, grid_cols, hdr, cpd_lo, 1.4, count_lo=cpd_lo, count_hi=cpd_hi, view=view, grid_deg=grid_deg)]
+        self.view, self.grid_deg = view, grid_deg
+        self.bank = self.subs[0].bank if self.subs else PatternBank(h, w, device, cpd_lo, cpd_hi, view=view)
+        if grid_deg:
+            fov_w, fov_h = field_of_view(w, h, view)
+            self.cols = max(4, int(round(fov_w / grid_deg))); self.rows = max(2, int(round(fov_h / grid_deg)))
+        else:
+            self.rows = max(1, int(round(grid_cols * h / w))); self.cols = grid_cols
+        self.ppd = pixels_per_degree(w, h, view=view)
 
     @torch.no_grad()
     def frame(self, lum: torch.Tensor, pse=None, n_seeds: int = 12, area_min: float = AREA_MIN, maps: bool = False,
@@ -281,7 +307,7 @@ class GridPatternJudge:
                 else:
                     yy_, xx_ = np.unravel_index(int(np.argmax(blk)), blk.shape)
                 seeds.append((y0_ + yy_, x0_ + xx_))
-            profs = _trace_profiles(lum, th, pat, seeds, self.ppd)
+            profs = _trace_profiles(lum, th, pat, seeds, self.ppd, view=self.view)
             if not profs:
                 continue
             Lmax = max(len(p[0]) for p in profs)
