@@ -1,0 +1,429 @@
+{
+ "version": 1,
+ "built": "2026-11-26T23:01:53",
+ "n": 42,
+ "items": [
+  {
+   "id": "real_pattern1",
+   "cat": "실제 패턴",
+   "path": "real/pattern_video1.mp4",
+   "expect": "위험",
+   "expect_labels": [
+    "정적 공간 패턴|변화 공간 패턴"
+   ],
+   "truth": "사용자 지정 패턴 영상",
+   "sha256": "62085bbbedba1f13"
+  },
+  {
+   "id": "real_pattern2",
+   "cat": "실제 패턴",
+   "path": "real/pattern_video2.mp4",
+   "expect": "위험",
+   "expect_labels": [
+    "정적 공간 패턴|변화 공간 패턴"
+   ],
+   "truth": "사용자 지정 패턴 영상",
+   "sha256": "912afc75f5ad1442"
+  },
+  {
+   "id": "static_straight60",
+   "cat": "정지 패턴",
+   "path": "synth/static_straight60.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "정적 공간 패턴"
+   ],
+   "truth": "ITU 원문 (실면적 60%)",
+   "sha256": "ceb4d787e7a5f37f"
+  },
+  {
+   "id": "static_area39",
+   "cat": "정지 패턴",
+   "path": "synth/static_area39.npz",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "ITU 원문 (실면적 39%)",
+   "sha256": "76b46c0c5c95b134"
+  },
+  {
+   "id": "static_area42",
+   "cat": "정지 패턴",
+   "path": "synth/static_area42.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "정적 공간 패턴"
+   ],
+   "truth": "ITU 원문 (실면적 42%)",
+   "sha256": "59b849a6a7a091b9"
+  },
+  {
+   "id": "static_concentric",
+   "cat": "정지 패턴",
+   "path": "synth/static_concentric.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "정적 공간 패턴"
+   ],
+   "truth": "ITU 원문 (실면적 56%)",
+   "sha256": "11ed4f3d6596986a"
+  },
+  {
+   "id": "static_radial",
+   "cat": "정지 패턴",
+   "path": "synth/static_radial.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "정적 공간 패턴"
+   ],
+   "truth": "ITU 원문 (실면적 56%)",
+   "sha256": "75b8097c903767e0"
+  },
+  {
+   "id": "static_checker",
+   "cat": "정지 패턴",
+   "path": "synth/static_checker.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "정적 공간 패턴"
+   ],
+   "truth": "ITU 원문 (실면적 60%)",
+   "sha256": "d9f18adb7030cce2"
+  },
+  {
+   "id": "static_dark165_sdr",
+   "cat": "정지 패턴",
+   "path": "synth/static_dark165_sdr.npz",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "ITU 원문 (실면적 60%)",
+   "sha256": "5d06d8c6d7a002c0"
+  },
+  {
+   "id": "motion_flow60",
+   "cat": "변화 패턴",
+   "path": "synth/motion_flow60.npz",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "ITU 원문 (흐름 면제 · 변화 25 %)",
+   "sha256": "7bad0839bb45c3e1"
+  },
+  {
+   "id": "motion_osc30",
+   "cat": "변화 패턴",
+   "path": "synth/motion_osc30.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "변화 공간 패턴"
+   ],
+   "truth": "ITU 원문 (흐름 면제 · 변화 25 %)",
+   "sha256": "61d59725fe32aafa"
+  },
+  {
+   "id": "motion_reverse30",
+   "cat": "변화 패턴",
+   "path": "synth/motion_reverse30.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "변화 공간 패턴"
+   ],
+   "truth": "ITU 원문 (흐름 면제 · 변화 25 %)",
+   "sha256": "2c7d747e95d916eb"
+  },
+  {
+   "id": "motion_flash30",
+   "cat": "변화 패턴",
+   "path": "synth/motion_flash30.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "변화 공간 패턴"
+   ],
+   "truth": "ITU 원문 (흐름 면제 · 변화 25 %)",
+   "sha256": "1b1fa6b2cd8c2916"
+  },
+  {
+   "id": "motion_orient30",
+   "cat": "변화 패턴",
+   "path": "synth/motion_orient30.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "변화 공간 패턴"
+   ],
+   "truth": "ITU 원문 (흐름 면제 · 변화 25 %)",
+   "sha256": "294a0436045ea8c2"
+  },
+  {
+   "id": "motion_zoom60",
+   "cat": "변화 패턴",
+   "path": "synth/motion_zoom60.npz",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "ITU 원문 (흐름 면제 · 변화 25 %)",
+   "sha256": "ed0b1117c30cdd26"
+  },
+  {
+   "id": "flash_square4hz",
+   "cat": "휘도 깜빡임",
+   "path": "synth/flash_square4hz.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "휘도 플래시"
+   ],
+   "truth": "ITU 원문",
+   "sha256": "ec67ef4e1bf8bce6"
+  },
+  {
+   "id": "flash_pulse22",
+   "cat": "휘도 깜빡임",
+   "path": "synth/flash_pulse22.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "휘도 플래시"
+   ],
+   "truth": "ITU 원문 (JV24 66 ms 해석이면 안전)",
+   "sha256": "5a36a956c5f836a3"
+  },
+  {
+   "id": "flash_pulse60",
+   "cat": "휘도 깜빡임",
+   "path": "synth/flash_pulse60.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "휘도 플래시"
+   ],
+   "truth": "ITU 원문",
+   "sha256": "5258d906b2aba90d"
+  },
+  {
+   "id": "flash_ramp120ms",
+   "cat": "휘도 깜빡임",
+   "path": "synth/flash_ramp120ms.npz",
+   "expect": "위험",
+   "expect_labels": [
+    "휘도 플래시"
+   ],
+   "truth": "ITU 원문",
+   "sha256": "8d74d369cfc82d2c"
+  },
+  {
+   "id": "flash_square3hz_boundary",
+   "cat": "휘도 깜빡임",
+   "path": "synth/flash_square3hz_boundary.npz",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "ITU 원문",
+   "sha256": "570200a44c2555fd"
+  },
+  {
+   "id": "flash_square4hz_area24",
+   "cat": "휘도 깜빡임",
+   "path": "synth/flash_square4hz_area24.npz",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "ITU 원문",
+   "sha256": "853a24b6939431f7"
+  },
+  {
+   "id": "big1_lum_flash_hazard",
+   "cat": "휘도 깜빡임",
+   "path": "big1/val_lum_flash_hazard_000.mp4",
+   "expect": "위험",
+   "expect_labels": [
+    "휘도 플래시"
+   ],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "8d7ee81d9011427e"
+  },
+  {
+   "id": "big1_lum_flash_near",
+   "cat": "휘도 깜빡임",
+   "path": "big1/val_lum_flash_near_000.mp4",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "e6dcfc199763f0e3"
+  },
+  {
+   "id": "big1_red_flash_hazard",
+   "cat": "적색 깜빡임",
+   "path": "big1/val_red_flash_hazard_000.mp4",
+   "expect": "위험",
+   "expect_labels": [
+    "적색 플래시"
+   ],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "bfc0fe133c499297"
+  },
+  {
+   "id": "big1_red_flash_near",
+   "cat": "적색 깜빡임",
+   "path": "big1/val_red_flash_near_000.mp4",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "cac6be7afa1bb058"
+  },
+  {
+   "id": "big1_lum_ext_hazard",
+   "cat": "연장 깜빡임",
+   "path": "big1/val_lum_ext_hazard_000.mp4",
+   "expect": "위험",
+   "expect_labels": [
+    "휘도 연장"
+   ],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "73ea8b6ee7697014"
+  },
+  {
+   "id": "big1_lum_ext_near",
+   "cat": "연장 깜빡임",
+   "path": "big1/val_lum_ext_near_000.mp4",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "56b18924f8654d64"
+  },
+  {
+   "id": "big1_red_ext_hazard",
+   "cat": "연장 깜빡임",
+   "path": "big1/val_red_ext_hazard_000.mp4",
+   "expect": "위험",
+   "expect_labels": [
+    "적색 연장"
+   ],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "ae5a60efb253f6a3"
+  },
+  {
+   "id": "big1_red_ext_near",
+   "cat": "연장 깜빡임",
+   "path": "big1/val_red_ext_near_000.mp4",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "425fc38c8453a4c1"
+  },
+  {
+   "id": "big1_scene_hazard",
+   "cat": "장면 전환",
+   "path": "big1/val_scene_hazard_000.mp4",
+   "expect": "위험",
+   "expect_labels": [
+    "빠른 장면 전환"
+   ],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "a857e1a7d2ad8e5a"
+  },
+  {
+   "id": "big1_scene_near",
+   "cat": "장면 전환",
+   "path": "big1/val_scene_near_000.mp4",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "d6c4b2c26341e319"
+  },
+  {
+   "id": "big1_intersection_hazard",
+   "cat": "교집합",
+   "path": "big1/val_intersection_hazard_000.mp4",
+   "expect": "위험",
+   "expect_labels": [
+    "교집합"
+   ],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "510ac38c34609eb9"
+  },
+  {
+   "id": "big1_intersection_near",
+   "cat": "교집합",
+   "path": "big1/val_intersection_near_000.mp4",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "32f3dc58e9935075"
+  },
+  {
+   "id": "big1_pattern_hazard",
+   "cat": "정지 패턴",
+   "path": "big1/val_pattern_hazard_003.mp4",
+   "expect": "위험",
+   "expect_labels": [
+    "정적 공간 패턴"
+   ],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "4b230e4e1138be6f"
+  },
+  {
+   "id": "big1_pattern_near",
+   "cat": "정지 패턴",
+   "path": "big1/val_pattern_near_000.mp4",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "생성 레시피 (near = 팀원 판 기준 문턱 근처)",
+   "sha256": "dce5e9733a04c329"
+  },
+  {
+   "id": "daily_bbb_leaves",
+   "cat": "안전 일상",
+   "path": "daily/bbb_leaves.mp4",
+   "expect": "안전",
+   "expect_labels": [],
+   "truth": "합성 전 바탕(가정) — 팀원 판은 패턴이라 함",
+   "sha256": "e00b737b60bed5da"
+  },
+  {
+   "id": "south_giphy-253",
+   "cat": "안전 일상",
+   "path": "daily/south_giphy-253.gif",
+   "expect": "미정",
+   "expect_labels": [],
+   "truth": "줄무늬 셔츠 흔들림 — 경계, 사람 확인 대기",
+   "sha256": "cbdb0546c9bce76e"
+  },
+  {
+   "id": "south_tenor-131",
+   "cat": "안전 일상",
+   "path": "daily/south_tenor-131.gif",
+   "expect": "미정",
+   "expect_labels": [],
+   "truth": "DVD 진열장 세로선 — 경계, 사람 확인 대기",
+   "sha256": "a1cf3fd0ee390563"
+  },
+  {
+   "id": "south_giphy-158",
+   "cat": "실제 패턴",
+   "path": "daily/south_giphy-158.gif",
+   "expect": "미정",
+   "expect_labels": [],
+   "truth": "PRIMO 로고 가는 가로줄 — G·팀원 판 모두 패턴",
+   "sha256": "b73c1cca7801e2e7"
+  },
+  {
+   "id": "kaya_1",
+   "cat": "실제 위험",
+   "path": "kaya/kaya_1.mp4",
+   "expect": "위험",
+   "expect_labels": [],
+   "truth": "외부 경고(Kaya 2025) — 세부 라벨 미정",
+   "sha256": "38f3528a16d5957d"
+  },
+  {
+   "id": "kaya_10",
+   "cat": "실제 위험",
+   "path": "kaya/kaya_10.mp4",
+   "expect": "위험",
+   "expect_labels": [],
+   "truth": "외부 경고(Kaya 2025) — 세부 라벨 미정",
+   "sha256": "4500da6171aa1e94"
+  },
+  {
+   "id": "kaya_19",
+   "cat": "실제 위험",
+   "path": "kaya/kaya_19.avi",
+   "expect": "위험",
+   "expect_labels": [],
+   "truth": "외부 경고(Kaya 2025) — 세부 라벨 미정",
+   "sha256": "6218ee4d11a5ecf7"
+  }
+ ]
+}
