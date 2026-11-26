@@ -73,3 +73,5 @@ ITC 2001 / Ofcom Annex 1 / BT.1702-3 Attachment 1(informative):
   격자 칸 = max(1°, 8 px)(위쪽: 반지름 r 동심원의 이웃 칸 방향 변화 ≤ 30° → 칸 ≤ 0.52 r, 가장 작은 위험 동심원 ≈ 2° → 1° — 계산), 판정 가능 범위(줄무늬 ≤ 0.45·ppd cpd, 깜빡임 ≤ fps/2 회/초) 문장으로 명시,
   압축 블록 지수(8 px 경계 이웃 차 비) > 1.3 이면 8·16 px 주기·축 정렬 줄무늬를 확인에서 제외. 예비 확인: CRF 45 에서 동심원 유지, ¼ 해상도(판정 가능 ≤ 2.6 cpd)에서 4.2 cpd 패턴은 '범위 밖'으로 설명됨.
   기본값 adapt=False — 강건성 실험(사전 등록 `scripts/robustness_sweep.py`)으로 채택 결정.
+- 2026-11-26 **깜빡임도 같은 틀로**(`grid_flash.py`): `judge_luminance/judge_red(grid_deg=, view=, fine_avg_deg=)` — 근거 격자를 시각도(max(1°, 8 px))로, `judge_video(adapt=True)` 면 패턴과 같은 칸.
+  판정 문턱은 그대로(회귀: 기본값에서 measure.py 와 불일치 0/10). 선택 사항 **미세 평균**(WCAG 2.2 '0.1° 보다 작은 칸의 균형 잡힌 미세 무늬(백색 잡음·체커)' 예외 → 측정 전 0.2° 상자 평균; ITU 에는 없음)은 기본 끔 — 사전 등록 `scripts/flash_robustness.py` 로 결정.

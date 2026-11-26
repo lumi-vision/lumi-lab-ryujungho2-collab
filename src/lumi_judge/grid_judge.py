@@ -83,7 +83,8 @@ def _rep_frame(r, fps):
     return int(hz[np.argmax(ar[hz])])
 
 
-def judge_video(frames_bgr: np.ndarray, fps: float, png_dir=None, name: str = "clip", view=None, adapt: bool = False) -> dict:
+def judge_video(frames_bgr: np.ndarray, fps: float, png_dir=None, name: str = "clip", view=None, adapt: bool = False,
+                fine_avg_deg: float | None = None) -> dict:
     """uint8 BGR [T,H,W,3] + fps → 라벨·조항·근거 문장 (+ png_dir 가 있으면 근거 그림).
     view: 시청 조건 (대각선 인치, 거리 cm), 기본 노트북 15인치 56 cm. adapt=True 면 quality.profile 로
     격자 칸(시각도, 최소 8 px)·블록 인공물 의심 표시를 영상에 맞추고, 판정 가능 범위를 결과에 넣는다(규격 문턱은 고정)."""
@@ -91,10 +92,11 @@ def judge_video(frames_bgr: np.ndarray, fps: float, png_dir=None, name: str = "c
     from .grid_pattern import VIEW_DEFAULT
     from .quality import limits_sentence, profile
     view = view or VIEW_DEFAULT
-    f1 = judge_luminance(frames_bgr, fps)
-    f2 = judge_red(frames_bgr, fps)
     h, w = frames_bgr.shape[1:3]
     qp = profile(frames_bgr, fps, view) if adapt else None
+    gdeg = qp["cell_deg"] if qp else None                              # 깜빡임 근거 격자도 패턴과 같은 시각도 칸
+    f1 = judge_luminance(frames_bgr, fps, grid_deg=gdeg, view=view, fine_avg_deg=fine_avg_deg)
+    f2 = judge_red(frames_bgr, fps, grid_deg=gdeg, view=view, fine_avg_deg=fine_avg_deg)
     G = GridPatternJudge(h, w, view=view, grid_deg=qp["cell_deg"] if qp else None)
     if qp and qp["blocky"]:
         for g_ in [G] + list(G.subs or []):

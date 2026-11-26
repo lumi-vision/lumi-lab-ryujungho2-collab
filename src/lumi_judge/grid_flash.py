@@ -118,16 +118,43 @@ def window_counts(e: np.ndarray, fps: float) -> np.ndarray:
     return csum[np.minimum(np.arange(n) + w, n)] - csum[:n]
 
 
-def grid_shape(h: int, w: int, cols: int = 32) -> tuple[int, int]:
+def grid_shape(h: int, w: int, cols: int = 32, grid_deg: float | None = None, view=None) -> tuple[int, int]:
+    """근거 격자 (행, 열). grid_deg 를 주면 칸 = 시각도 grid_deg (해상도·화면·거리에 따라 칸 수가 정해짐 — 정지 패턴과 같은 방식)."""
+    if grid_deg:
+        from .grid_pattern import VIEW_DEFAULT, field_of_view
+        fw, fh = field_of_view(w, h, view or VIEW_DEFAULT)
+        return max(2, int(round(fh / grid_deg))), max(4, int(round(fw / grid_deg)))
     rows = max(1, int(round(cols * h / w)))
     return rows, cols
 
 
+def fine_kernel_px(h: int, w: int, fine_avg_deg: float | None, view=None) -> int:
+    """미세 평균 창(px, 홀수). WCAG 2.2 의 '0.1° 보다 작은 칸의 균형 잡힌 미세 무늬(백색 잡음·체커)' 예외를 구현할 때
+    한 주기(0.2°)를 평균하면 그런 무늬의 밝기 변화가 상쇄된다. ITU 에는 이 예외가 없다 → 선택 사항(기본 끔, 실험으로 결정)."""
+    if not fine_avg_deg:
+        return 1
+    from .grid_pattern import VIEW_DEFAULT, pixels_per_degree
+    k = int(round(fine_avg_deg * pixels_per_degree(w, h, view=view or VIEW_DEFAULT)))
+    return max(1, k + (1 - k % 2))
+
+
+def fine_average(img: torch.Tensor, k: int) -> torch.Tensor:
+    """[T,H,W] 또는 [T,H,W,C] 를 k×k 상자 평균(가장자리 복제)."""
+    if k <= 1:
+        return img
+    ch_last = img.dim() == 4
+    z = img.permute(0, 3, 1, 2) if ch_last else img[:, None]
+    z = torch.nn.functional.avg_pool2d(torch.nn.functional.pad(z.float(), (k // 2,) * 4, mode="replicate"), k, stride=1)
+    return z.permute(0, 2, 3, 1) if ch_last else z[:, 0]
+
+
 @torch.no_grad()
-def judge_luminance(frames_bgr: np.ndarray, fps: float, device: str = "cuda", grid_cols: int = 32) -> dict:
-    """F1 판정 + 근거. frames_bgr uint8 [T,H,W,3] numpy."""
+def judge_luminance(frames_bgr: np.ndarray, fps: float, device: str = "cuda", grid_cols: int = 32,
+                    grid_deg: float | None = None, view=None, fine_avg_deg: float | None = None) -> dict:
+    """F1 판정 + 근거. frames_bgr uint8 [T,H,W,3] numpy.
+    grid_deg: 근거 격자를 시각도로(정지 패턴과 같은 방식) · fine_avg_deg: WCAG 미세 무늬 예외(측정 전 미세 평균) — 둘 다 판정 문턱은 바꾸지 않음."""
     x = torch.from_numpy(np.ascontiguousarray(frames_bgr)).to(device)
-    lum = luminance_cd(x)
+    lum = fine_average(luminance_cd(x), fine_kernel_px(x.shape[1], x.shape[2], fine_avg_deg, view))
     signed = pixel_transitions(lum)
     c = concurrency_frames(fps)
     e, a_up, a_dn = screen_transitions(signed, c)
@@ -150,7 +177,7 @@ def judge_luminance(frames_bgr: np.ndarray, fps: float, device: str = "cuda", gr
                 dl_vals.append(float(d.median()))
     flashes = float(counts.max()) / 2.0 if len(counts) else 0.0
     H, W = signed.shape[1:]
-    gr, gc = grid_shape(H, W, grid_cols)
+    gr, gc = grid_shape(H, W, grid_cols, grid_deg, view)
     cell = torch.nn.functional.adaptive_avg_pool2d(hazard_mask.float()[None, None], (gr, gc))[0, 0].cpu().numpy()
     segs = []
     if starts.size:
@@ -247,14 +274,19 @@ def red_transitions(frames: torch.Tensor):
 
 
 @torch.no_grad()
-def judge_red(frames_bgr: np.ndarray, fps: float, device: str = "cuda", grid_cols: int = 32) -> dict:
+def judge_red(frames_bgr: np.ndarray, fps: float, device: str = "cuda", grid_cols: int = 32,
+              grid_deg: float | None = None, view=None, fine_avg_deg: float | None = None) -> dict:
     x = torch.from_numpy(np.ascontiguousarray(frames_bgr)).to(device)
+    k = fine_kernel_px(x.shape[1], x.shape[2], fine_avg_deg, view)
+    if k > 1:                                                          # 색은 sRGB 값 평균(근사) 후 다시 8 비트로
+        x = fine_average(x, k).round().clamp(0, 255).to(torch.uint8)
     signed, max_duv = red_transitions(x)
-    return _judge_from_signed(signed, fps, grid_cols, CLAUSE_F2, extra={"max_delta_uv": round(max_duv, 3)})
+    return _judge_from_signed(signed, fps, grid_cols, CLAUSE_F2, extra={"max_delta_uv": round(max_duv, 3)}, grid_deg=grid_deg, view=view)
 
 
 @torch.no_grad()
-def _judge_from_signed(signed: torch.Tensor, fps: float, grid_cols: int, clause: str, extra: dict | None = None) -> dict:
+def _judge_from_signed(signed: torch.Tensor, fps: float, grid_cols: int, clause: str, extra: dict | None = None,
+                       grid_deg: float | None = None, view=None) -> dict:
     c = concurrency_frames(fps)
     e, a_up, a_dn = screen_transitions(signed, c)
     counts = window_counts(e, fps)
@@ -268,7 +300,7 @@ def _judge_from_signed(signed: torch.Tensor, fps: float, grid_cols: int, clause:
         hazard_mask |= (signed[max(0, t - c + 1):t + 1] == int(e[t])).any(0)
     flashes = float(counts.max()) / 2.0 if len(counts) else 0.0
     H, W = signed.shape[1:]
-    gr, gc = grid_shape(H, W, grid_cols)
+    gr, gc = grid_shape(H, W, grid_cols, grid_deg, view)
     cell = torch.nn.functional.adaptive_avg_pool2d(hazard_mask.float()[None, None], (gr, gc))[0, 0].cpu().numpy()
     segs = []
     if starts.size:
