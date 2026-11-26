@@ -239,6 +239,7 @@ class GridPatternJudge:
             self.subs = [GridPatternJudge(h, w, device, grid_cols, hdr, CPD_LO, cpd_hi, count_lo=cpd_lo, count_hi=cpd_hi, view=view, grid_deg=grid_deg),
                          GridPatternJudge(h, w, device, grid_cols, hdr, cpd_lo, 1.4, count_lo=cpd_lo, count_hi=cpd_hi, view=view, grid_deg=grid_deg)]
         self.view, self.grid_deg = view, grid_deg
+        self.block_px = None              # 압축 블록 인공물이 뚜렷한 영상이면 8 — 그 주기·축 정렬 줄무늬는 확인에서 제외(quality.profile)
         self.bank = self.subs[0].bank if self.subs else PatternBank(h, w, device, cpd_lo, cpd_hi, view=view)
         if grid_deg:
             fov_w, fov_h = field_of_view(w, h, view)
@@ -321,6 +322,15 @@ class GridPatternJudge:
             P, C, _, NE, ET, EV = hyst_runs(V, T, lens, pse_u)
             P = P.get(); C = C.get(); NE = NE.get(); ET = ET.get(); EV = EV.get()
             reg_ok = np.array([_best_run_regularity(ET[i], EV[i], int(NE[i]), pse_u) <= LOCAL_REG_MAX for i in range(len(P))])
+            if self.block_px:
+                # 블록 인공물 의심: 주기(px)가 블록의 1·2 배(±12 %)이고 영역 방향이 가로/세로축(±5°)이면 확인에서 제외
+                th_med = float(np.median([th_c[r, c] for r, c in cells])) % 90.0
+                axis = min(th_med, 90.0 - th_med) <= 5.0
+                per_px = np.where(C > 1e-6, self.ppd / np.maximum(C, 1e-6), 0.0)
+                near = np.zeros(len(P), bool)
+                for m in (1, 2):
+                    near |= np.abs(per_px - m * self.block_px) <= 0.12 * m * self.block_px
+                reg_ok &= ~(near & axis)
             Pq = np.where(reg_ok, P, 0)
             j = int(np.argmax(Pq))
             pairs, cpd = int(Pq[j]), float(C[j])

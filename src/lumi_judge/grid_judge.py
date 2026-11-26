@@ -83,12 +83,23 @@ def _rep_frame(r, fps):
     return int(hz[np.argmax(ar[hz])])
 
 
-def judge_video(frames_bgr: np.ndarray, fps: float, png_dir=None, name: str = "clip") -> dict:
-    """uint8 BGR [T,H,W,3] + fps → 라벨·조항·근거 문장 (+ png_dir 가 있으면 근거 그림)."""
+def judge_video(frames_bgr: np.ndarray, fps: float, png_dir=None, name: str = "clip", view=None, adapt: bool = False) -> dict:
+    """uint8 BGR [T,H,W,3] + fps → 라벨·조항·근거 문장 (+ png_dir 가 있으면 근거 그림).
+    view: 시청 조건 (대각선 인치, 거리 cm), 기본 노트북 15인치 56 cm. adapt=True 면 quality.profile 로
+    격자 칸(시각도, 최소 8 px)·블록 인공물 의심 표시를 영상에 맞추고, 판정 가능 범위를 결과에 넣는다(규격 문턱은 고정)."""
     from pathlib import Path
+    from .grid_pattern import VIEW_DEFAULT
+    from .quality import limits_sentence, profile
+    view = view or VIEW_DEFAULT
     f1 = judge_luminance(frames_bgr, fps)
     f2 = judge_red(frames_bgr, fps)
-    pm = judge_pattern_motion(frames_bgr, fps)
+    h, w = frames_bgr.shape[1:3]
+    qp = profile(frames_bgr, fps, view) if adapt else None
+    G = GridPatternJudge(h, w, view=view, grid_deg=qp["cell_deg"] if qp else None)
+    if qp and qp["blocky"]:
+        for g_ in [G] + list(G.subs or []):
+            g_.block_px = 8
+    pm = judge_pattern_motion(frames_bgr, fps, G=G)
     findings = []
     s = _flash_sentence("휘도 깜빡임", f1)
     if s:
@@ -103,8 +114,7 @@ def judge_video(frames_bgr: np.ndarray, fps: float, png_dir=None, name: str = "c
         if fx:
             fx.update(_frame=int(fx["evidence"]["first_fail_s"] * fps), _cells=[], _shape=r_["evidence"]["grid_shape"])
             findings.append(fx)
-    h, w = frames_bgr.shape[1:3]
-    shp = [max(1, int(round(32 * h / w))), 32]
+    shp = [G.rows, G.cols]
     if pm["p1"] and pm["best1"]:
         b = pm["best1"]
         findings.append({"label": "정적 공간 패턴", "clause": CLAUSE_P1,
@@ -136,7 +146,9 @@ def judge_video(frames_bgr: np.ndarray, fps: float, png_dir=None, name: str = "c
     if ba and ba["area_flow"] > 0.25 and not (pm["p1"] or pm["p2"]):          # 면제로 안전이 된 경우도 이유를 남긴다(설명 가능성)
         notes.append(f"{_sec(ba['t'])} 무렵 화면의 {100 * ba['area_flow']:.0f}%에 줄무늬 {ba['pairs']}쌍이 있으나 한 방향으로 매끄럽게 흐름 "
                      "→ 규격의 흐름 면제(BT.1702-3 Att.1)로 패턴 위험 아님")
+    if qp:
+        notes.append(limits_sentence(qp))
     return {"dangerous": bool(findings), "labels": [f["label"] for f in findings], "findings": findings, "notes": notes,
-            "not_implemented": NOT_IMPLEMENTED,
+            "quality": qp, "not_implemented": NOT_IMPLEMENTED,
             "summary": ("위험: " + " / ".join(f["sentence"] for f in findings)) if findings else
                        "기준을 넘는 휘도·적색 깜빡임, 연장 깜빡임, 정지·변화 패턴이 없음"}
