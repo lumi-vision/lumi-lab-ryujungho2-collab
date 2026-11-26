@@ -57,7 +57,23 @@ def decode(p: Path):
     if p.suffix.lower() == ".gif" or fps <= 0:
         from eval_real_hazards import decode as dec_any
         x, fps = dec_any(p); return x, fps
-    return np.stack(frames), fps
+    return shrink(np.stack(frames)), fps
+
+
+MAX_W = 640                                                            # 분석 폭 상한 — 팀원 판 analysis_max_width 와 같음(면적 % 는 그대로)
+
+
+def shrink(x):
+    """폭 > 640 이면 640 으로 줄임(GPU). 판정 가능 줄무늬 상한은 결과의 '판정 가능 범위'에 반영됨."""
+    if x.shape[2] <= MAX_W:
+        return x
+    import torch.nn.functional as F
+    h = int(round(x.shape[1] * MAX_W / x.shape[2]))
+    out = np.empty((len(x), h, MAX_W, 3), np.uint8)
+    for s in range(0, len(x), 64):
+        t = torch.from_numpy(x[s:s + 64]).cuda().permute(0, 3, 1, 2).float()
+        out[s:s + 64] = F.interpolate(t, size=(h, MAX_W), mode="area").round().clamp(0, 255).byte().permute(0, 2, 3, 1).cpu().numpy()
+    return out
 
 
 def chunks(T, fps):

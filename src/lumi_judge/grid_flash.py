@@ -29,10 +29,14 @@ def window_frames(fps: float) -> int:
 
 @torch.no_grad()
 def luminance_cd(frames_bgr: torch.Tensor) -> torch.Tensor:
-    """uint8 BGR [T,H,W,3] (GPU) → cd/m² float32 [T,H,W] (measure.luminance_cd 와 같은 식)."""
-    c = frames_bgr.to(torch.float32) / 255.0
-    lin = torch.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
-    return WHITE_CD * (0.2126 * lin[..., 2] + 0.7152 * lin[..., 1] + 0.0722 * lin[..., 0])
+    """uint8 BGR [T,H,W,3] (GPU) → cd/m² float32 [T,H,W] (measure.luminance_cd 와 같은 식).
+    32 프레임씩 나눠 계산 — 결과는 같고, 긴·고해상도 영상에서 GPU 메모리 최대 사용량만 줄인다(2026-11-27)."""
+    out = torch.empty(frames_bgr.shape[:-1], dtype=torch.float32, device=frames_bgr.device)
+    for s in range(0, frames_bgr.shape[0], 32):
+        c = frames_bgr[s:s + 32].to(torch.float32) / 255.0
+        lin = torch.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+        out[s:s + 32] = WHITE_CD * (0.2126 * lin[..., 2] + 0.7152 * lin[..., 1] + 0.0722 * lin[..., 0])
+    return out
 
 
 @torch.no_grad()
