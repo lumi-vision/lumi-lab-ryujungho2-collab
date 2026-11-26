@@ -14,6 +14,9 @@
   2. 아니면 끈 채로 두고(ITU 원문 그대로), WCAG 축 보고용 선택 사항으로만 남김.
   3. '범위 밖'으로 설명되지 않는 놓침은 결함 후보로 목록화.
 출력: checks/judge/flash_robustness.md · data/judge/flash_robustness.jsonl
+변경 기록
+  2026-11-26 22:4x 범위 축소(결과를 보기 전): 클립당 약 1 분이라 287 개면 약 5 시간 → big1 위험·near 는 8 묶음(휘도/적색/휘도 연장/적색 연장
+  × hazard/near)에서 묶음마다 10 개를 고정 난수(시드 0)로 뽑음(80) + 바탕 41 + 시험 6 = 127. 먼저 계산된 5 행은 보지 않고 지움. 판단 규칙은 그대로.
 """
 from __future__ import annotations
 
@@ -44,14 +47,21 @@ def judge(x, fps, fine):
 def jobs():
     from make_hazard7_dataset import FPS, decode
     J = []
+    groups: dict = {}
     for split in ("val", "test"):
         for p in sorted(glob.glob(str(ROOT / f"data/hazard7/big1/{split}/{split}_*.mp4"))):
             name = Path(p).name
-            if ".clean." in name or not any(k in name for k in ("lum_flash", "red_flash", "lum_ext", "red_ext")):
+            kind = next((k for k in ("lum_flash", "red_flash", "lum_ext", "red_ext") if f"_{k}_" in name), None)
+            if ".clean." in name or kind is None:
                 continue
             grp = "haz" if "_hazard_" in name else ("near" if "_near_" in name else None)
             if grp:
-                J.append((grp, f"{split}/{name}", lambda p=p: (decode(Path(p)), FPS), None))
+                groups.setdefault((kind, grp), []).append((split, name, p))
+    rng = np.random.default_rng(0)                                     # 범위 축소: 묶음마다 10 개 (변경 기록 참고)
+    for (kind, grp), items in sorted(groups.items()):
+        for i in sorted(rng.choice(len(items), min(10, len(items)), replace=False)):
+            split, name, p = items[i]
+            J.append((grp, f"{split}/{name}", lambda p=p: (decode(Path(p)), FPS), None))
     dr = [json.loads(l) for l in (ROOT / "data/judge/pattern_diag_rows.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
     for rid in sorted({r["id"] for r in dr if r["grp"] == "fp"}):
         J.append(("safe_bg", "bg/" + rid, lambda rid=rid: (decode(ROOT / "data/hazard7/big1/train" / rid), FPS), False))
